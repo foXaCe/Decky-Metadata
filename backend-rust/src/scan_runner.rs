@@ -1114,7 +1114,7 @@ mod tests {
     async fn scan_targets_records_that_still_need_a_localized_description() {
         let (_directory, state) = test_state(Vec::new()).await;
         state.http.set_content_language("french");
-        set_record(&state, 1, json!({"title":"Attempted","source":"IGN","description":"FR","content_locale":"french","localized_attempted":"french"})).await;
+        set_record(&state, 1, json!({"title":"Attempted","source":"IGN","description":"FR","content_locale":"french","localized_attempted":"french#2"})).await;
         set_record(&state, 2, json!({"title":"Needs","source":"IGN","description":"EN","content_locale":"french"})).await;
         set_record(&state, 3, json!({"title":"Steam","source":"Steam","description":"FR","content_locale":"french"})).await;
         let games = [
