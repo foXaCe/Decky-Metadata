@@ -165,7 +165,7 @@ export type ArtworkCandidate = {
   height?: number;
   style?: string;
 };
-export type ArtworkCandidates = Record<"portrait" | "landscape" | "hero" | "logo", ArtworkCandidate[]>;
+export type ArtworkCandidates = Record<"portrait" | "landscape" | "hero" | "logo" | "icon", ArtworkCandidate[]>;
 export type ArtworkStatus = Record<"portrait" | "landscape" | "hero" | "logo", boolean>;
 
 export const listArtwork = callable<
@@ -179,6 +179,10 @@ export const getArtworkStatus = callable<
   [appIds: number[]],
   Record<string, ArtworkStatus>
 >("artwork_status");
+export const applyIconArtwork = callable<
+  [appId: number, url: string],
+  { ok: boolean; restart_required: boolean }
+>("apply_icon_artwork");
 export const getDebugLogging = callable<[], boolean>("get_debug_logging");
 export const setDebugLogging = callable<[enabled: boolean], boolean>(
   "set_debug_logging"

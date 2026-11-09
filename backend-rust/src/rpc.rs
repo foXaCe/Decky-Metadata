@@ -38,6 +38,7 @@ pub const METHODS: &[&str] = &[
     "list_artwork",
     "download_artwork",
     "artwork_status",
+    "apply_icon_artwork",
     "put_protondb_cache",
     "get_hltb_settings",
     "set_hltb_settings",
@@ -326,6 +327,22 @@ pub async fn dispatch(state: Arc<AppState>, method: &str, args: Vec<Value>) -> M
                 .map(|values| values.iter().filter_map(Value::as_u64).collect())
                 .unwrap_or_default();
             Ok(crate::providers::steamgriddb::status(&ids))
+        }
+        "apply_icon_artwork" => {
+            arity(&args, 2, 2)?;
+            let key = storage::artwork_api_key(state.store().await?.data());
+            if key.is_empty() {
+                return Err("SteamGridDB API key is not set".to_owned());
+            }
+            let app_id = args[0].as_u64().ok_or("invalid app id")?;
+            let applied = crate::providers::steamgriddb::apply_shortcut_icon(
+                &state.http,
+                &key,
+                app_id,
+                &metadata::text(&args[1]),
+            )
+            .await?;
+            Ok(json!({"ok": applied, "restart_required": true}))
         }
         "get_debug_logging" => {
             arity(&args, 0, 0)?;

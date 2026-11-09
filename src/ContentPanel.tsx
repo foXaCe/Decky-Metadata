@@ -960,6 +960,7 @@ export const Content = () => {
         onClearCache={() => void clearCache()}
         onRefreshDelisted={() => void refreshDelisted()}
       />
+      <ArtworkSection games={games} />
       <CompatibilitySection
         initiallyExpanded={returningDropdown === "category" || returningDropdown === "scope"}
         compatibilityDefault={compatibilityDefault}
@@ -1071,7 +1072,6 @@ export const Content = () => {
         }
         onInstallVersionConfirmed={setPluginVersion}
       />
-      <ArtworkSection games={games} />
       <VersionsSection
         pluginVersion={pluginVersion}
         deckyVersion={deckyVersion}

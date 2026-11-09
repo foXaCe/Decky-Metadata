@@ -1,12 +1,14 @@
-import { Focusable, Navigation, PanelSection, PanelSectionRow, ScrollPanel, useParams } from "@decky/ui";
+import { Focusable, Navigation, PanelSection, PanelSectionRow, ScrollPanel, TextField, showModal, useParams } from "@decky/ui";
 import { useCallback, useEffect, useState } from "react";
 
 import { artworkCandidates, applyArtworkAsset } from "./artwork";
+import { getArtworkSettings, getPluginLogs, setArtworkSettings } from "./backend";
+import { PluginLogModal } from "./components/qam/PluginLogModal";
 import type { ArtworkCandidate, ArtworkCandidates } from "./backend";
 import { t } from "./i18n";
 import type { MessageKey } from "./i18n";
 import { appName, metadataCache } from "./steam";
-import { compactTextStyle, FocusableButton, pageStyle, pageTitleStyle } from "./styles";
+import { compactTextStyle, fieldStyle, FocusableButton, pageStyle, pageTitleStyle, rowStackStyle } from "./styles";
 import { toastError, toastSuccess } from "./toast";
 
 type Slot = {
@@ -22,6 +24,7 @@ const SLOTS: Slot[] = [
   { kind: "landscape", label: "editor.artwork.slot.landscape", type: 3, width: 200, height: 94 },
   { kind: "hero", label: "editor.artwork.slot.hero", type: 1, width: 240, height: 78 },
   { kind: "logo", label: "editor.artwork.slot.logo", type: 2, width: 200, height: 90 },
+  { kind: "icon", label: "editor.artwork.slot.icon", type: 4, width: 96, height: 96 },
 ];
 
 const steamApps = () => (globalThis as any)?.SteamClient?.Apps;
@@ -33,6 +36,9 @@ export const ArtworkPage = () => {
   const [candidates, setCandidates] = useState<Partial<ArtworkCandidates> | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [configured, setConfigured] = useState(false);
+  const [keyDraft, setKeyDraft] = useState("");
+  const [logsBusy, setLogsBusy] = useState(false);
   const title = appName(appId);
 
   const load = useCallback(async () => {
@@ -49,18 +55,71 @@ export const ArtworkPage = () => {
 
   useEffect(() => {
     void load();
+    void getArtworkSettings()
+      .then((settings) => setConfigured(settings.configured))
+      .catch(() => undefined);
   }, [load]);
 
   const apply = async (candidate: ArtworkCandidate) => {
     if (busy) return;
     setBusy(true);
     try {
-      await applyArtworkAsset(appId, slot.kind, candidate.url);
-      toastSuccess(t("editor.artwork.applied"), "");
+      const restart = await applyArtworkAsset(appId, slot.kind, candidate.url);
+      toastSuccess(
+        t("editor.artwork.applied"),
+        restart ? t("editor.artwork.restart") : "",
+      );
     } catch (error) {
       toastError(t("qam.artwork.title"), String(error));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const saveKey = async () => {
+    if (busy || !keyDraft.trim()) return;
+    setBusy(true);
+    try {
+      const saved = await setArtworkSettings(keyDraft.trim());
+      setConfigured(saved.configured);
+      setKeyDraft("");
+      await load();
+    } catch (error) {
+      toastError(t("qam.artwork.title"), String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clearAll = async () => {
+    if (busy) return;
+    const api = steamApps();
+    if (!api?.ClearCustomArtworkForApp) return;
+    setBusy(true);
+    try {
+      for (const entry of SLOTS) {
+        await api.ClearCustomArtworkForApp(appId, entry.type);
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
+      toastSuccess(t("editor.artwork.clearedAll"), "");
+    } catch (error) {
+      toastError(t("qam.artwork.title"), String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const viewLogs = async () => {
+    if (logsBusy) return;
+    setLogsBusy(true);
+    try {
+      const logs = await getPluginLogs();
+      let modal: ReturnType<typeof showModal> | undefined;
+      modal = showModal(<PluginLogModal logs={logs} closeModal={() => modal?.Close()} />);
+    } catch (error) {
+      toastError(t("qam.logs.title"), String(error));
+    } finally {
+      setLogsBusy(false);
     }
   };
 
@@ -142,6 +201,38 @@ export const ArtworkPage = () => {
             </FocusableButton>
             <FocusableButton className="DialogButton" disabled={busy} onClick={() => void clear()}>
               {t("editor.artwork.clear")}
+            </FocusableButton>
+          </PanelSectionRow>
+        </PanelSection>
+        <PanelSection title={t("editor.artwork.manage")}>
+          <PanelSectionRow>
+            <div style={compactTextStyle}>
+              {configured ? t("qam.artwork.configured") : t("qam.artwork.hint")}
+            </div>
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <div style={rowStackStyle}>
+              <TextField
+                label={t("qam.artwork.keyLabel")}
+                value={keyDraft}
+                onChange={(event) => setKeyDraft(event.target.value)}
+                style={fieldStyle}
+              />
+              <FocusableButton
+                className="DialogButton"
+                disabled={busy || !keyDraft.trim()}
+                onClick={() => void saveKey()}
+              >
+                {t("qam.artwork.save")}
+              </FocusableButton>
+            </div>
+          </PanelSectionRow>
+          <PanelSectionRow>
+            <FocusableButton className="DialogButton" disabled={busy} onClick={() => void clearAll()}>
+              {t("editor.artwork.clearAll")}
+            </FocusableButton>
+            <FocusableButton className="DialogButton" disabled={logsBusy} onClick={() => void viewLogs()}>
+              {t("qam.logs.view")}
             </FocusableButton>
           </PanelSectionRow>
         </PanelSection>

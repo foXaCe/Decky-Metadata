@@ -526,6 +526,18 @@ mod tests {
     }
 
     #[test]
+    fn replaces_only_the_icon_of_the_matching_shortcut() {
+        let vdf = b"\x00shortcuts\x00\x00\x02appid\x00\x11\x22\x33\x44\x01appname\x00Game A\x00\x01icon\x00/old/a.png\x00\x08\x08";
+        let updated = set_shortcut_icon(vdf, 0x44332211, "/grid/a.png").unwrap();
+        let text = String::from_utf8_lossy(&updated);
+        assert!(text.contains("/grid/a.png"));
+        assert!(!text.contains("/old/a.png"));
+        assert!(text.contains("Game A"));
+        assert!(set_shortcut_icon(vdf, 0x11223344, "/x.png").is_err());
+        assert!(set_shortcut_icon(vdf, 0x44332211, "/a\0b.png").is_err());
+    }
+
+    #[test]
     fn parses_signed_high_bit_ids_and_fields_without_writing() {
         let path = Path::new("/steam/userdata/765/config/shortcuts.vdf");
         let parsed = parse_shortcuts_vdf(&fixture(), path);
@@ -662,4 +674,60 @@ mod tests {
         assert!(parse_shortcuts_vdf(&oversized, &path).is_empty());
         fs::remove_dir_all(dir).unwrap();
     }
+}
+
+/// Replace the `icon` value of one shortcut in place.
+///
+/// Steam stores the icon as a plain path in the binary VDF. Rewriting only that
+/// string keeps every other byte (and every unknown field) untouched, which a
+/// full re-serialization could not guarantee.
+pub fn set_shortcut_icon(data: &[u8], app_id: u32, icon_path: &str) -> Result<Vec<u8>, String> {
+    if icon_path.contains('\0') {
+        return Err("icon path contains a NUL byte".to_owned());
+    }
+    let mut result = data.to_vec();
+    let mut search_from = 0usize;
+    while let Some(relative) = find(&result[search_from..], b"\x02appid\x00")
+        .or_else(|| find(&result[search_from..], b"\x02AppID\x00"))
+    {
+        let marker = search_from + relative;
+        let value_start = marker + "\x02appid\x00".len();
+        let Some(value) = result.get(value_start..value_start + 4) else {
+            break;
+        };
+        let stored = u32::from_le_bytes([value[0], value[1], value[2], value[3]]);
+        if stored == app_id {
+            let icon_prefix = [&b"\x01icon\x00"[..], &b"\x01Icon\x00"[..]]
+                .into_iter()
+                .filter_map(|prefix| find(&result[value_start..], prefix).map(|offset| (prefix, offset)))
+                .min_by_key(|(_, offset)| *offset);
+            let Some((prefix, offset)) = icon_prefix else {
+                return Err("shortcut has no icon field".to_owned());
+            };
+            let value_start = value_start + offset + prefix.len();
+            let Some(end) = result[value_start..].iter().position(|byte| *byte == 0) else {
+                return Err("shortcut icon value is not terminated".to_owned());
+            };
+            result.splice(value_start..value_start + end, icon_path.bytes());
+            return Ok(result);
+        }
+        search_from = value_start;
+    }
+    Err("shortcut not found".to_owned())
+}
+
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+/// Write the shortcut file atomically, keeping the original if the write fails.
+pub fn write_shortcuts_vdf(path: &Path, data: &[u8]) -> Result<(), String> {
+    let temporary = path.with_extension("vdf.tmp");
+    std::fs::write(&temporary, data).map_err(|error| error.to_string())?;
+    std::fs::rename(&temporary, path).map_err(|error| {
+        let _ = std::fs::remove_file(&temporary);
+        error.to_string()
+    })
 }

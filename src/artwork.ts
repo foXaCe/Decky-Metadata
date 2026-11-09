@@ -5,7 +5,7 @@
  * images as base64; Steam's own `SetCustomArtworkForApp` writes the files and
  * invalidates the library cache, so the plugin never touches `config/grid`.
  */
-import { downloadArtwork, fetchArtwork, getArtworkStatus, listArtwork } from "./backend";
+import { applyIconArtwork, downloadArtwork, fetchArtwork, getArtworkStatus, listArtwork } from "./backend";
 import * as log from "./log";
 
 /** Steam artwork slots: 0 portrait grid, 1 hero, 2 logo, 3 landscape grid. */
@@ -17,6 +17,7 @@ const SLOTS: Array<[string, number]> = [
 ];
 
 export type ArtworkPayload = Partial<Record<"portrait" | "landscape" | "hero" | "logo", string>>;
+export type ArtworkKind = "portrait" | "landscape" | "hero" | "logo" | "icon";
 
 type SteamArtworkApi = {
   SetCustomArtworkForApp?: (appId: number, data: string, format: string, type: number) => Promise<void>;
@@ -57,9 +58,15 @@ export const applyArtwork = async (appId: number, payload: ArtworkPayload): Prom
 /** Apply one chosen gallery image to one Steam slot. */
 export const applyArtworkAsset = async (
   appId: number,
-  kind: keyof ArtworkPayload,
+  kind: ArtworkKind,
   url: string,
-): Promise<void> => {
+): Promise<boolean> => {
+  if (kind === "icon") {
+    // Shortcut icons are not part of Steam's artwork API; the backend writes
+    // the file and the shortcuts.vdf entry, and Steam picks it up on restart.
+    const result = await applyIconArtwork(appId, url);
+    return result.restart_required;
+  }
   const api = steamApps();
   if (!api?.SetCustomArtworkForApp) {
     throw new Error("Steam artwork API is unavailable");
@@ -69,6 +76,7 @@ export const applyArtworkAsset = async (
   const data = await downloadArtwork(url);
   if (!data) throw new Error("Artwork download failed");
   await api.SetCustomArtworkForApp(appId, data, "png", slot[1]);
+  return false;
 };
 
 /** Gallery candidates for every Steam slot. */

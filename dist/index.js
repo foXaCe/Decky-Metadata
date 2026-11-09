@@ -125,6 +125,7 @@ const fetchArtwork = callable("fetch_artwork");
 const listArtwork = callable("list_artwork");
 const downloadArtwork = callable("download_artwork");
 const getArtworkStatus = callable("artwork_status");
+const applyIconArtwork = callable("apply_icon_artwork");
 const getDebugLogging = callable("get_debug_logging");
 const setDebugLogging = callable("set_debug_logging");
 const getCompatibilityDefault = callable("get_compatibility_default");
@@ -160,6 +161,7 @@ const evalInBigPicture = callable("eval_in_big_picture");
 var backend = /*#__PURE__*/Object.freeze({
     __proto__: null,
     applyFetchedMetadata: applyFetchedMetadata,
+    applyIconArtwork: applyIconArtwork,
     autoFetchMetadata: autoFetchMetadata,
     checkForPluginUpdate: checkForPluginUpdate,
     checkHltbGameId: checkHltbGameId,
@@ -550,10 +552,15 @@ const en = {
     "editor.artwork.pageTitle": "Artwork — {{game}}",
     "editor.artwork.reload": "Search again",
     "editor.artwork.clear": "Remove this image",
+    "editor.artwork.clearAll": "Remove all artwork",
+    "editor.artwork.clearedAll": "Artwork removed",
+    "editor.artwork.manage": "Manage",
     "editor.artwork.slot.portrait": "Portrait",
     "editor.artwork.slot.landscape": "Wide capsule",
     "editor.artwork.slot.hero": "Hero",
     "editor.artwork.slot.logo": "Logo",
+    "editor.artwork.slot.icon": "Icon",
+    "editor.artwork.restart": "Restart Steam to see the new icon.",
     "qam.artwork.applyMissing": "Fetch artwork for games missing it",
     "qam.artwork.batchProgress": "{{done}}/{{total}}",
     "toast.artwork.applied": "{{count}} images applied",
@@ -908,10 +915,15 @@ const fr = {
     "editor.artwork.pageTitle": "Illustrations — {{game}}",
     "editor.artwork.reload": "Rechercher à nouveau",
     "editor.artwork.clear": "Supprimer cette image",
+    "editor.artwork.clearAll": "Supprimer toutes les illustrations",
+    "editor.artwork.clearedAll": "Illustrations supprimées",
+    "editor.artwork.manage": "Gérer",
     "editor.artwork.slot.portrait": "Portrait",
     "editor.artwork.slot.landscape": "Vignette paysage",
     "editor.artwork.slot.hero": "Bannière",
     "editor.artwork.slot.logo": "Logo",
+    "editor.artwork.slot.icon": "Icône",
+    "editor.artwork.restart": "Redémarrez Steam pour voir la nouvelle icône.",
     "qam.artwork.applyMissing": "Télécharger les illustrations manquantes",
     "qam.artwork.batchProgress": "{{done}}/{{total}}",
     "toast.artwork.applied": "{{count}} images appliquées",
@@ -1268,6 +1280,12 @@ const applyArtwork = async (appId, payload) => {
 };
 /** Apply one chosen gallery image to one Steam slot. */
 const applyArtworkAsset = async (appId, kind, url) => {
+    if (kind === "icon") {
+        // Shortcut icons are not part of Steam's artwork API; the backend writes
+        // the file and the shortcuts.vdf entry, and Steam picks it up on restart.
+        const result = await applyIconArtwork(appId, url);
+        return result.restart_required;
+    }
     const api = steamApps$1();
     if (!api?.SetCustomArtworkForApp) {
         throw new Error("Steam artwork API is unavailable");
@@ -1279,6 +1297,7 @@ const applyArtworkAsset = async (appId, kind, url) => {
     if (!data)
         throw new Error("Artwork download failed");
     await api.SetCustomArtworkForApp(appId, data, "png", slot[1]);
+    return false;
 };
 /** Gallery candidates for every Steam slot. */
 const artworkCandidates = async (appId, title, steamAppId) => listArtwork(appId, title, steamAppId ?? null);
@@ -17689,7 +17708,7 @@ const Content = () => {
     const returningDropdown = hasCompatibilityDropdownReturn()
         ? compatibilityDropdownReturnOrigin()
         : null;
-    return (SP_JSX.jsxs(DFL.Focusable, { ref: focusPanel, preferredFocus: true, navEntryPreferPosition: DFL.NavEntryPositionPreferences.PREFERRED_CHILD, style: qamPanelStyle, children: [SP_JSX.jsx(MetadataSection, { detectedCount: games.length, savedCount: metadataCount, missingCount: missing, scanBusy: busy, scanMessage: scanMessage, scanStatusKind: scanStatusKind, cacheBusy: cacheBusy, delistedCountText: delistedCountText, delistedDateText: delistedDateText, delistedBusy: delistedBusy, onRefreshMetadata: () => void scanMissing(), onClearCache: () => void clearCache(), onRefreshDelisted: () => void refreshDelisted() }), SP_JSX.jsx(CompatibilitySection, { initiallyExpanded: returningDropdown === "category" || returningDropdown === "scope", compatibilityDefault: compatibilityDefault, compatibilityDefaultLoaded: compatibilityDefaultLoaded, compatibilityDefaultBusy: compatibilityDefaultBusy, compatibilityDefaultError: compatibilityDefaultError, compatibilityDefaultScope: compatibilityDefaultScope, compatibilityDefaultScopeBusy: compatibilityDefaultScopeBusy, onCompatibilityDefaultChange: (category) => void saveCompatibilityDefault(category), onCompatibilityDefaultScopeChange: (scope) => void saveCompatibilityDefaultScope(scope), onCompatibilityDefaultMenuWillOpen: requestCompatibilityDropdownReturn, onCompatibilityDefaultControlRef: setCompatibilityDefaultControl, onCompatibilityDefaultScopeControlRef: setCompatibilityDefaultScopeControl }), SP_JSX.jsx(ProtonDbBadgesSection, { initiallyExpanded: returningDropdown === "protondb-cover-position", snapshot: protonDbSnapshot, onSettingsChange: (settings) => protonDbBadgeController.setSettings(settings), onCoverPositionChange: async (coverPosition) => {
+    return (SP_JSX.jsxs(DFL.Focusable, { ref: focusPanel, preferredFocus: true, navEntryPreferPosition: DFL.NavEntryPositionPreferences.PREFERRED_CHILD, style: qamPanelStyle, children: [SP_JSX.jsx(MetadataSection, { detectedCount: games.length, savedCount: metadataCount, missingCount: missing, scanBusy: busy, scanMessage: scanMessage, scanStatusKind: scanStatusKind, cacheBusy: cacheBusy, delistedCountText: delistedCountText, delistedDateText: delistedDateText, delistedBusy: delistedBusy, onRefreshMetadata: () => void scanMissing(), onClearCache: () => void clearCache(), onRefreshDelisted: () => void refreshDelisted() }), SP_JSX.jsx(ArtworkSection, { games: games }), SP_JSX.jsx(CompatibilitySection, { initiallyExpanded: returningDropdown === "category" || returningDropdown === "scope", compatibilityDefault: compatibilityDefault, compatibilityDefaultLoaded: compatibilityDefaultLoaded, compatibilityDefaultBusy: compatibilityDefaultBusy, compatibilityDefaultError: compatibilityDefaultError, compatibilityDefaultScope: compatibilityDefaultScope, compatibilityDefaultScopeBusy: compatibilityDefaultScopeBusy, onCompatibilityDefaultChange: (category) => void saveCompatibilityDefault(category), onCompatibilityDefaultScopeChange: (scope) => void saveCompatibilityDefaultScope(scope), onCompatibilityDefaultMenuWillOpen: requestCompatibilityDropdownReturn, onCompatibilityDefaultControlRef: setCompatibilityDefaultControl, onCompatibilityDefaultScopeControlRef: setCompatibilityDefaultScopeControl }), SP_JSX.jsx(ProtonDbBadgesSection, { initiallyExpanded: returningDropdown === "protondb-cover-position", snapshot: protonDbSnapshot, onSettingsChange: (settings) => protonDbBadgeController.setSettings(settings), onCoverPositionChange: async (coverPosition) => {
                     requestCompatibilityDropdownReturn("protondb-cover-position");
                     noteCompatibilityDropdownControlUnmounted();
                     try {
@@ -17732,7 +17751,7 @@ const Content = () => {
                 }, onQualityMenuWillOpen: () => {
                     requestCompatibilityDropdownReturn("quality");
                     noteCompatibilityDropdownControlUnmounted();
-                }, onQualityControlRef: setTrailerQualityControl }), SP_JSX.jsx(MiniAchievementsSection, { state: miniAchievementsSnapshot, onEnabledChange: (enabled) => void miniAchievementsController.setEnabled(enabled) }), SP_JSX.jsx(LogsSection, { logsBusy: logsBusy, debugLogging: debugLogging, debugLoggingBusy: debugLoggingBusy, onViewLogs: () => void viewLogs(), onToggleDebugLogging: (enabled) => void saveDebugLogging(enabled) }), SP_JSX.jsx(PluginUpdateSection, { currentVersion: pluginVersion, updateChannel: updateChannel, automaticUpdateChecks: automaticUpdateChecks, settingsLoaded: settingsLoaded, onToggleUpdateChannel: (enabled) => void saveUpdateChannel(enabled), onToggleAutomaticUpdateChecks: (enabled) => void saveAutomaticUpdateChecks(enabled), onInstallVersionConfirmed: setPluginVersion }), SP_JSX.jsx(ArtworkSection, { games: games }), SP_JSX.jsx(VersionsSection, { pluginVersion: pluginVersion, deckyVersion: deckyVersion, steamosVersion: steamosVersion, controllerTypes: controllerTypes })] }));
+                }, onQualityControlRef: setTrailerQualityControl }), SP_JSX.jsx(MiniAchievementsSection, { state: miniAchievementsSnapshot, onEnabledChange: (enabled) => void miniAchievementsController.setEnabled(enabled) }), SP_JSX.jsx(LogsSection, { logsBusy: logsBusy, debugLogging: debugLogging, debugLoggingBusy: debugLoggingBusy, onViewLogs: () => void viewLogs(), onToggleDebugLogging: (enabled) => void saveDebugLogging(enabled) }), SP_JSX.jsx(PluginUpdateSection, { currentVersion: pluginVersion, updateChannel: updateChannel, automaticUpdateChecks: automaticUpdateChecks, settingsLoaded: settingsLoaded, onToggleUpdateChannel: (enabled) => void saveUpdateChannel(enabled), onToggleAutomaticUpdateChecks: (enabled) => void saveAutomaticUpdateChecks(enabled), onInstallVersionConfirmed: setPluginVersion }), SP_JSX.jsx(VersionsSection, { pluginVersion: pluginVersion, deckyVersion: deckyVersion, steamosVersion: steamosVersion, controllerTypes: controllerTypes })] }));
 };
 
 /*
@@ -19217,6 +19236,7 @@ const SLOTS = [
     { kind: "landscape", label: "editor.artwork.slot.landscape", type: 3, width: 200, height: 94 },
     { kind: "hero", label: "editor.artwork.slot.hero", type: 1, width: 240, height: 78 },
     { kind: "logo", label: "editor.artwork.slot.logo", type: 2, width: 200, height: 90 },
+    { kind: "icon", label: "editor.artwork.slot.icon", type: 4, width: 96, height: 96 },
 ];
 const steamApps = () => globalThis?.SteamClient?.Apps;
 const ArtworkPage = () => {
@@ -19226,6 +19246,9 @@ const ArtworkPage = () => {
     const [candidates, setCandidates] = SP_REACT.useState(null);
     const [loading, setLoading] = SP_REACT.useState(false);
     const [busy, setBusy] = SP_REACT.useState(false);
+    const [configured, setConfigured] = SP_REACT.useState(false);
+    const [keyDraft, setKeyDraft] = SP_REACT.useState("");
+    const [logsBusy, setLogsBusy] = SP_REACT.useState(false);
     const title = appName(appId);
     const load = SP_REACT.useCallback(async () => {
         setLoading(true);
@@ -19242,20 +19265,77 @@ const ArtworkPage = () => {
     }, [appId, title]);
     SP_REACT.useEffect(() => {
         void load();
+        void getArtworkSettings()
+            .then((settings) => setConfigured(settings.configured))
+            .catch(() => undefined);
     }, [load]);
     const apply = async (candidate) => {
         if (busy)
             return;
         setBusy(true);
         try {
-            await applyArtworkAsset(appId, slot.kind, candidate.url);
-            toastSuccess(t("editor.artwork.applied"), "");
+            const restart = await applyArtworkAsset(appId, slot.kind, candidate.url);
+            toastSuccess(t("editor.artwork.applied"), restart ? t("editor.artwork.restart") : "");
         }
         catch (error) {
             toastError(t("qam.artwork.title"), String(error));
         }
         finally {
             setBusy(false);
+        }
+    };
+    const saveKey = async () => {
+        if (busy || !keyDraft.trim())
+            return;
+        setBusy(true);
+        try {
+            const saved = await setArtworkSettings(keyDraft.trim());
+            setConfigured(saved.configured);
+            setKeyDraft("");
+            await load();
+        }
+        catch (error) {
+            toastError(t("qam.artwork.title"), String(error));
+        }
+        finally {
+            setBusy(false);
+        }
+    };
+    const clearAll = async () => {
+        if (busy)
+            return;
+        const api = steamApps();
+        if (!api?.ClearCustomArtworkForApp)
+            return;
+        setBusy(true);
+        try {
+            for (const entry of SLOTS) {
+                await api.ClearCustomArtworkForApp(appId, entry.type);
+            }
+            await new Promise((resolve) => window.setTimeout(resolve, 500));
+            toastSuccess(t("editor.artwork.clearedAll"), "");
+        }
+        catch (error) {
+            toastError(t("qam.artwork.title"), String(error));
+        }
+        finally {
+            setBusy(false);
+        }
+    };
+    const viewLogs = async () => {
+        if (logsBusy)
+            return;
+        setLogsBusy(true);
+        try {
+            const logs = await getPluginLogs();
+            let modal;
+            modal = DFL.showModal(SP_JSX.jsx(PluginLogModal, { logs: logs, closeModal: () => modal?.Close() }));
+        }
+        catch (error) {
+            toastError(t("qam.logs.title"), String(error));
+        }
+        finally {
+            setLogsBusy(false);
         }
     };
     const clear = async () => {
@@ -19278,7 +19358,7 @@ const ArtworkPage = () => {
         }
     };
     const items = candidates?.[slot.kind] ?? [];
-    return (SP_JSX.jsx(DFL.ScrollPanel, { children: SP_JSX.jsxs("div", { style: pageStyle, children: [SP_JSX.jsx(DFL.Focusable, { className: "DialogButton", onActivate: () => DFL.Navigation.NavigateBack(), style: pageTitleStyle, children: t("editor.artwork.pageTitle", { game: title }) }), SP_JSX.jsx(DFL.PanelSection, { children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { display: "flex", flexWrap: "wrap", gap: 8 }, children: SLOTS.map((entry) => (SP_JSX.jsx(FocusableButton, { className: "DialogButton", onClick: () => setSlot(entry), style: entry.kind === slot.kind ? { outline: "2px solid #1a9fff" } : undefined, children: t(entry.label) }, entry.kind))) }) }) }), SP_JSX.jsx(DFL.PanelSection, { children: loading ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.artwork.loading") }) })) : items.length === 0 ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.artwork.empty") }) })) : (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { display: "flex", flexWrap: "wrap", gap: 10 }, children: items.map((candidate) => (SP_JSX.jsx(FocusableButton, { className: "DialogButton", disabled: busy, onClick: () => void apply(candidate), style: { padding: 0, minWidth: slot.width, height: slot.height }, children: SP_JSX.jsx("img", { src: candidate.thumb || candidate.url, alt: "", style: { width: slot.width, height: slot.height, objectFit: "contain" } }) }, candidate.url))) }) })) }), SP_JSX.jsx(DFL.PanelSection, { children: SP_JSX.jsxs(DFL.PanelSectionRow, { children: [SP_JSX.jsx(FocusableButton, { className: "DialogButton", disabled: busy, onClick: () => void load(), children: t("editor.artwork.reload") }), SP_JSX.jsx(FocusableButton, { className: "DialogButton", disabled: busy, onClick: () => void clear(), children: t("editor.artwork.clear") })] }) })] }) }));
+    return (SP_JSX.jsx(DFL.ScrollPanel, { children: SP_JSX.jsxs("div", { style: pageStyle, children: [SP_JSX.jsx(DFL.Focusable, { className: "DialogButton", onActivate: () => DFL.Navigation.NavigateBack(), style: pageTitleStyle, children: t("editor.artwork.pageTitle", { game: title }) }), SP_JSX.jsx(DFL.PanelSection, { children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { display: "flex", flexWrap: "wrap", gap: 8 }, children: SLOTS.map((entry) => (SP_JSX.jsx(FocusableButton, { className: "DialogButton", onClick: () => setSlot(entry), style: entry.kind === slot.kind ? { outline: "2px solid #1a9fff" } : undefined, children: t(entry.label) }, entry.kind))) }) }) }), SP_JSX.jsx(DFL.PanelSection, { children: loading ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.artwork.loading") }) })) : items.length === 0 ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.artwork.empty") }) })) : (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { display: "flex", flexWrap: "wrap", gap: 10 }, children: items.map((candidate) => (SP_JSX.jsx(FocusableButton, { className: "DialogButton", disabled: busy, onClick: () => void apply(candidate), style: { padding: 0, minWidth: slot.width, height: slot.height }, children: SP_JSX.jsx("img", { src: candidate.thumb || candidate.url, alt: "", style: { width: slot.width, height: slot.height, objectFit: "contain" } }) }, candidate.url))) }) })) }), SP_JSX.jsx(DFL.PanelSection, { children: SP_JSX.jsxs(DFL.PanelSectionRow, { children: [SP_JSX.jsx(FocusableButton, { className: "DialogButton", disabled: busy, onClick: () => void load(), children: t("editor.artwork.reload") }), SP_JSX.jsx(FocusableButton, { className: "DialogButton", disabled: busy, onClick: () => void clear(), children: t("editor.artwork.clear") })] }) }), SP_JSX.jsxs(DFL.PanelSection, { title: t("editor.artwork.manage"), children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: compactTextStyle, children: configured ? t("qam.artwork.configured") : t("qam.artwork.hint") }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: rowStackStyle, children: [SP_JSX.jsx(DFL.TextField, { label: t("qam.artwork.keyLabel"), value: keyDraft, onChange: (event) => setKeyDraft(event.target.value), style: fieldStyle }), SP_JSX.jsx(FocusableButton, { className: "DialogButton", disabled: busy || !keyDraft.trim(), onClick: () => void saveKey(), children: t("qam.artwork.save") })] }) }), SP_JSX.jsxs(DFL.PanelSectionRow, { children: [SP_JSX.jsx(FocusableButton, { className: "DialogButton", disabled: busy, onClick: () => void clearAll(), children: t("editor.artwork.clearAll") }), SP_JSX.jsx(FocusableButton, { className: "DialogButton", disabled: logsBusy, onClick: () => void viewLogs(), children: t("qam.logs.view") })] })] })] }) }));
 };
 
 const protonDbCoverSurface = (path) => {

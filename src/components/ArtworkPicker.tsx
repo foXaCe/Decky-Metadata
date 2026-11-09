@@ -13,6 +13,7 @@ const SLOTS: Array<{ kind: keyof ArtworkCandidates; label: MessageKey; width: nu
   { kind: "landscape", label: "editor.artwork.slot.landscape", width: 160, height: 75 },
   { kind: "hero", label: "editor.artwork.slot.hero", width: 180, height: 58 },
   { kind: "logo", label: "editor.artwork.slot.logo", width: 140, height: 60 },
+  { kind: "icon", label: "editor.artwork.slot.icon", width: 72, height: 72 },
 ];
 
 type ArtworkPickerProps = {

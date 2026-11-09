@@ -100,8 +100,7 @@ fn pick(assets: &[Value], accept: impl Fn(i64, i64) -> bool) -> Option<String> {
     })
 }
 
-async fn download(http: &Http, api_key: &str, url: Option<&str>) -> Option<String> {
-    let url = url?;
+async fn download_bytes(http: &Http, api_key: &str, url: &str) -> Option<Vec<u8>> {
     let response = http
         .request(
             Method::GET,
@@ -117,7 +116,12 @@ async fn download(http: &Http, api_key: &str, url: Option<&str>) -> Option<Strin
     if !(200..300).contains(&response.status) || response.body.is_empty() {
         return None;
     }
-    Some(base64(&response.body))
+    Some(response.body)
+}
+
+async fn download(http: &Http, api_key: &str, url: Option<&str>) -> Option<String> {
+    let url = url?;
+    download_bytes(http, api_key, url).await.map(|body| base64(&body))
 }
 
 async fn get(http: &Http, api_key: &str, path: &str) -> Result<Value, ()> {
@@ -258,8 +262,10 @@ pub async fn candidates(
         "landscape".into(),
         listing(&grids, |width, height| width > height && ratio(width, height, 920.0 / 430.0, 0.25)),
     );
+    let icons = assets(http, api_key, &format!("/icons/game/{game_id}?nsfw=false&humor=false")).await;
     payload.insert("hero".into(), listing(&heroes, |_, _| true));
     payload.insert("logo".into(), listing(&logos, |_, _| true));
+    payload.insert("icon".into(), listing(&icons, |_, _| true));
     Value::Object(payload)
 }
 
@@ -302,6 +308,48 @@ pub async fn download_url(http: &Http, api_key: &str, url: &str) -> Option<Strin
         return None;
     }
     download(http, api_key.trim(), Some(url)).await
+}
+
+/// Install a shortcut icon and point Steam's shortcuts.vdf at it.
+///
+/// Icons are not part of Steam's custom-artwork API for shortcuts, so this
+/// writes the image next to the other artwork and replaces only the `icon`
+/// value of the matching shortcut. Steam reads it after a restart.
+pub async fn apply_shortcut_icon(
+    http: &Http,
+    api_key: &str,
+    app_id: u64,
+    url: &str,
+) -> Result<bool, String> {
+    let parsed = reqwest::Url::parse(url).map_err(|error| error.to_string())?;
+    let host = parsed.host_str().unwrap_or_default();
+    if parsed.scheme() != "https" || (!host.ends_with(".steamgriddb.com") && host != "steamgriddb.com") {
+        return Err("artwork host is not SteamGridDB".to_owned());
+    }
+    let bytes = download_bytes(http, api_key.trim(), url)
+        .await
+        .ok_or_else(|| "icon download failed".to_owned())?;
+    let shortcuts = crate::steam_paths::detect_steam_installs(&crate::steam_paths::discover_steam_roots())
+        .into_iter()
+        .flat_map(|install| install.userdata_dirs)
+        .map(|dir| dir.join("config").join("shortcuts.vdf"))
+        .find(|path| path.is_file())
+        .ok_or_else(|| "shortcuts.vdf not found".to_owned())?;
+    let grid = shortcuts
+        .parent()
+        .ok_or_else(|| "invalid shortcuts path".to_owned())?
+        .join("grid");
+    std::fs::create_dir_all(&grid).map_err(|error| error.to_string())?;
+    let icon_path = grid.join(format!("{app_id}_icon.png"));
+    std::fs::write(&icon_path, &bytes).map_err(|error| error.to_string())?;
+    let data = std::fs::read(&shortcuts).map_err(|error| error.to_string())?;
+    let updated = crate::shortcuts_vdf::set_shortcut_icon(
+        &data,
+        app_id as u32,
+        &icon_path.to_string_lossy(),
+    )?;
+    crate::shortcuts_vdf::write_shortcuts_vdf(&shortcuts, &updated)?;
+    Ok(true)
 }
 
 /// Which artwork files Steam already stores for each shortcut.
