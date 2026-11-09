@@ -23,6 +23,38 @@ const SEARCH_LIMIT: usize = 5;
 /// At most two extracts are fetched per game: a series article is rejected and
 /// the next candidate is tried once.
 const MAX_EXTRACT_ATTEMPTS: usize = 2;
+/// Wikimedia asks clients to keep a low request rate; a library scan issues a
+/// few requests per game.
+const MIN_REQUEST_INTERVAL: Duration = Duration::from_millis(250);
+const RETRY_DELAY: Duration = Duration::from_millis(1000);
+
+static NEXT_REQUEST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// Space requests out and retry once, so a burst of lookups does not turn into
+/// rate-limit errors that leave descriptions in English.
+async fn fetch_json(http: &Http, url: &str) -> Result<serde_json::Value, ()> {
+    for attempt in 0..2 {
+        if attempt > 0 {
+            tokio::time::sleep(RETRY_DELAY).await;
+        }
+        if let Some(delay) = reserve_request_slot() {
+            tokio::time::sleep(delay).await;
+        }
+        match http.json(url, REQUEST_TIMEOUT, REQUEST_LIMIT).await {
+            Ok(payload) => return Ok(payload),
+            Err(_) => continue,
+        }
+    }
+    Err(())
+}
+
+fn reserve_request_slot() -> Option<Duration> {
+    let mut next = NEXT_REQUEST.lock().ok()?;
+    let now = std::time::Instant::now();
+    let delay = next.map(|next| next.saturating_duration_since(now));
+    *next = Some(now + delay.unwrap_or_default() + MIN_REQUEST_INTERVAL);
+    delay
+}
 
 pub enum Lookup {
     Found(LocalizedIntro),
@@ -172,10 +204,7 @@ pub async fn is_video_game(http: &Http, code: &str, article_title: &str) -> Opti
         .append_pair("props", "claims")
         .append_pair("format", "json")
         .append_pair("utf8", "1");
-    let payload = http
-        .json(url.as_str(), REQUEST_TIMEOUT, REQUEST_LIMIT)
-        .await
-        .ok()?;
+    let payload = fetch_json(http, url.as_str()).await.ok()?;
     let entity = payload["entities"]
         .as_object()
         .and_then(|entities| entities.values().next())?;
@@ -194,10 +223,7 @@ async fn search(http: &Http, code: &str, title: &str) -> Result<Vec<String>, ()>
         .append_pair("srlimit", &SEARCH_LIMIT.to_string())
         .append_pair("format", "json")
         .append_pair("utf8", "1");
-    let payload = http
-        .json(url.as_str(), REQUEST_TIMEOUT, REQUEST_LIMIT)
-        .await
-        .map_err(|_| ())?;
+    let payload = fetch_json(http, url.as_str()).await?;
     let items = payload["query"]["search"]
         .as_array()
         .cloned()
@@ -220,10 +246,7 @@ async fn extract(http: &Http, code: &str, title: &str) -> Result<Option<String>,
         .append_pair("format", "json")
         .append_pair("utf8", "1")
         .append_pair("titles", title);
-    let payload = http
-        .json(url.as_str(), REQUEST_TIMEOUT, REQUEST_LIMIT)
-        .await
-        .map_err(|_| ())?;
+    let payload = fetch_json(http, url.as_str()).await?;
     let Some(pages) = payload["query"]["pages"].as_object() else {
         return Ok(None);
     };
@@ -527,10 +550,10 @@ mod tests {
 
     #[tokio::test]
     async fn reports_a_failed_request_as_unavailable() {
-        let http = Http::fixtures(vec![Fixture::failure(search_url(
-            "fr",
-            "Neutral Racer jeu vidéo",
-        ))]);
+        let http = Http::fixtures(vec![
+            Fixture::failure(search_url("fr", "Neutral Racer jeu vidéo")),
+            Fixture::failure(search_url("fr", "Neutral Racer jeu vidéo")),
+        ]);
         assert!(matches!(
             localized_intro(&http, "french", "Neutral Racer").await,
             Lookup::Unavailable
@@ -562,7 +585,10 @@ mod tests {
         assert_eq!(is_video_game(&software, "fr", "Example Tool").await, Some(false));
         software.assert_drained();
 
-        let failed = Http::fixtures(vec![Fixture::failure(url("Example Quest"))]);
+        let failed = Http::fixtures(vec![
+            Fixture::failure(url("Example Quest")),
+            Fixture::failure(url("Example Quest")),
+        ]);
         assert_eq!(is_video_game(&failed, "fr", "Example Quest").await, None);
         failed.assert_drained();
     }
