@@ -4,6 +4,31 @@ All notable changes to this project are documented here in Keep a Changelog form
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-09
+
+French interface, localized metadata, and SteamGridDB artwork.
+
+### Added
+
+- **French interface.** The Quick Access Menu, the metadata editor, the
+  context-menu entries, and the plugin toasts follow the Steam language.
+  English and French ship with the plugin; other languages fall back to
+  English.
+- **Metadata in the Steam language.** Steam store text, genres, and partner
+  events are requested in the active language, and records fetched in another
+  language are refreshed in the background.
+- **GOG and Wikipedia descriptions.** A game without localized Steam text uses
+  the GOG store page when it is sold there, then the Wikipedia article in that
+  language.
+- **Machine-translation fallback.** When no source has the active language, the
+  English description is translated through MyMemory and stored on the record.
+- **SteamGridDB artwork.** The game menu opens an artwork page that lists
+  proposals for the portrait grid, wide grid, hero, logo, and icon, applies a
+  chosen image through Steam, removes one slot, or clears every artwork. The
+  QAM can also fill every shortcut that misses artwork.
+- **Artwork settings.** The SteamGridDB key, the plugin logs, and a full
+  artwork cleanup are available from the artwork page and the QAM.
+
 ### Changed
 
 - **HLTB "Details" button.** The button that opens a game's HowLongToBeat page
