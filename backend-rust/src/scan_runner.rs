@@ -661,7 +661,7 @@ async fn metadata_match(
             if metadata::complete(&enriched) {
                 return Ok(ScanResult::matched(enriched, "ign"));
             }
-            if let Some(created) = metadata::create_from_wikipedia(state, &enriched).await? {
+            if let Some(created) = metadata::create_localized_record(state, &enriched).await? {
                 return Ok(ScanResult::matched(created, "wikipedia"));
             }
             partial = enriched;
@@ -673,7 +673,7 @@ async fn metadata_match(
         .await?
         .filter(matching::py_truthy)
     else {
-        if let Some(created) = metadata::create_from_wikipedia(
+        if let Some(created) = metadata::create_localized_record(
             state,
             &json!({"title": title, "id": title}),
         )
@@ -1068,7 +1068,16 @@ mod tests {
             }
             url.to_string()
         };
+        let gog = {
+            let mut url = Url::parse("https://catalog.gog.com/v1/catalog").unwrap();
+            url.query_pairs_mut()
+                .append_pair("query", "like:Neutral Racer")
+                .append_pair("limit", "5")
+                .append_pair("locale", "fr-FR");
+            url.to_string()
+        };
         let fixtures = vec![
+            Fixture::json(gog, json!({"products": []})),
             Fixture::json(
                 wiki(&[("action","query"),("list","search"),("srsearch","Neutral Racer jeu vidéo"),
                        ("srlimit","5"),("format","json"),("utf8","1")]),
