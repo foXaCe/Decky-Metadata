@@ -315,9 +315,12 @@ async fn metadata_targets(state: &AppState, games: &[GameInput]) -> Result<Vec<T
         .filter(|game| {
             let key = game.app_id.to_string();
             !metadata::removed_by_user(storage.data(), &key)
-                && !records
+                && records
                     .and_then(|records| records.get(&key))
-                    .is_some_and(|record| metadata::complete_in(record, &language))
+                    .map_or(true, |record| {
+                        !metadata::complete_in(record, &language)
+                            || metadata::needs_localization(record, &language)
+                    })
         })
         .map(|game| Target {
             app_id: game.app_id.clone(),
@@ -561,6 +564,26 @@ async fn metadata_match(
     target: &Target,
     delisted_refreshed: &mut bool,
 ) -> Result<ScanResult, String> {
+    // A complete record that only lacks a localized description needs no
+    // provider refresh: fill the description in place.
+    if let Some(existing) = target
+        .metadata
+        .as_ref()
+        .filter(|record| metadata::complete(record))
+    {
+        if metadata::needs_localization(existing, &state.http.content_language()) {
+            let saved = metadata::localize_record(
+                state,
+                target.app_id.as_i64().unwrap_or(0),
+                existing,
+            )
+            .await?;
+            return Ok(ScanResult::matched(
+                saved.unwrap_or_else(|| existing.clone()),
+                "localization",
+            ));
+        }
+    }
     let title = &target.title;
     let steam_shell = json!({"title": title, "source": "Manual", "id": title});
     let steam = metadata::with_steam_news(state, steam_shell, title, 10, true).await?;
@@ -1023,6 +1046,24 @@ mod tests {
             1
         );
         state.http.assert_drained();
+        state.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn scan_targets_records_that_still_need_a_localized_description() {
+        let (_directory, state) = test_state(Vec::new()).await;
+        state.http.set_content_language("french");
+        set_record(&state, 1, json!({"title":"Attempted","source":"IGN","description":"FR","content_locale":"french","localized_attempted":"french"})).await;
+        set_record(&state, 2, json!({"title":"Needs","source":"IGN","description":"EN","content_locale":"french"})).await;
+        set_record(&state, 3, json!({"title":"Steam","source":"Steam","description":"FR","content_locale":"french"})).await;
+        let games = [
+            GameInput { app_id: json!(1).as_i64().unwrap().into(), name: None },
+            GameInput { app_id: json!(2).as_i64().unwrap().into(), name: None },
+            GameInput { app_id: json!(3).as_i64().unwrap().into(), name: None },
+        ];
+        let targets = metadata_targets(&state, &games).await.unwrap();
+        let ids: Vec<i64> = targets.iter().map(|target| target.app_id.as_i64().unwrap()).collect();
+        assert_eq!(ids, vec![2]);
         state.shutdown().await.unwrap();
     }
 
