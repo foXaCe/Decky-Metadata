@@ -11762,7 +11762,7 @@ const resolveTrailerSource = (context) => {
 // @ts-nocheck
 // This self-contained function is serialized into Steam's default world.
 // Adapted from Decky-TrailerHero by LoZazaMastro; see NOTICE for inherited terms.
-function deckyMetadataTrailerRuntimeFactory(nextSettings, ownerId, settingsRevision, injectedTranslations, identity, nextIgnFallback) {
+function deckyMetadataTrailerRuntimeFactory(nextSettings, ownerId, settingsRevision, injectedTranslations, identity, nextIgnFallback, contentLanguage) {
     const runtimeKey = "__deckyMetadataTrailerRuntime";
     const runtimeVersion = "0.2.0";
     const styleId = "decky-metadata-trailer-style";
@@ -13547,7 +13547,26 @@ function deckyMetadataTrailerRuntimeFactory(nextSettings, ownerId, settingsRevis
             this.metadataController = controller;
             const timeout = window.setTimeout(() => controller.abort(), 9000);
             try {
-                const requestUrl = `https://store.steampowered.com/api/appdetails?appids=${appId}&filters=movies`;
+                const languageHints = {
+                    french: ["français", "francais", "french", "vostfr"],
+                    german: ["deutsch", "german"],
+                    spanish: ["español", "espanol", "spanish"],
+                    latam: ["español", "espanol", "spanish"],
+                    italian: ["italiano", "italian"],
+                    portuguese: ["português", "portugues", "portuguese"],
+                    brazilian: ["português", "portugues", "portuguese"],
+                    russian: ["русск", "russian"],
+                    japanese: ["日本語", "japanese"],
+                    koreana: ["한국", "korean"],
+                    schinese: ["中文", "chinese"],
+                    tchinese: ["中文", "chinese"],
+                    polish: ["polski", "polish"],
+                    turkish: ["türkçe", "turkce", "turkish"],
+                    dutch: ["nederlands", "dutch"],
+                    ukrainian: ["україн", "ukrainian"],
+                };
+                const activeLanguage = String(contentLanguage || "english");
+                const requestUrl = `https://store.steampowered.com/api/appdetails?appids=${appId}&filters=movies&l=${encodeURIComponent(activeLanguage)}`;
                 const response = await fetch(requestUrl, {
                     signal: controller.signal, cache: "default", redirect: "error"
                 });
@@ -13560,7 +13579,16 @@ function deckyMetadataTrailerRuntimeFactory(nextSettings, ownerId, settingsRevis
                 const movies = payload?.[String(appId)]?.data?.movies ?? [];
                 if (!Array.isArray(movies) || !movies.length)
                     return { ok: false, error: rt("noSteamTrailer") };
-                const movie = movies.find((entry) => entry?.highlight) ?? movies[0];
+                // Publishers sometimes upload a localized trailer next to the
+                // English one; prefer a name that announces the active language.
+                const hints = languageHints[activeLanguage] || [];
+                const localized = hints.length
+                    ? movies.find((entry) => {
+                        const name = String(entry?.name || "").toLowerCase();
+                        return hints.some((hint) => name.includes(hint));
+                    })
+                    : undefined;
+                const movie = localized ?? movies.find((entry) => entry?.highlight) ?? movies[0];
                 if (!movie?.id)
                     return { ok: false, error: rt("steamTrailerNotPlayable") };
                 const candidates = [];
@@ -15185,8 +15213,9 @@ class TrailerController {
       const identity = ${JSON.stringify(this.identity)};
       const ignFallback = ${JSON.stringify(this.ignFallback) ?? "undefined"};
       const translations = ${JSON.stringify(TRANSLATIONS)};
+      const contentLanguage = ${JSON.stringify(currentSteamLanguage())};
       const factory = ${deckyMetadataTrailerRuntimeFactory.toString()};
-      return factory(settings, ownerId, settingsRevision, translations, identity, ignFallback);
+      return factory(settings, ownerId, settingsRevision, translations, identity, ignFallback, contentLanguage);
     })()`;
     }
     withTimeout(promise, timeoutMs) {

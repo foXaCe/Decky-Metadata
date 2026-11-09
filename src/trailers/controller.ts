@@ -14,6 +14,7 @@ import {
 import { ensureMetadataCache } from "../steam/metadataPatch";
 import { ignGameUrl, isTrailerHomeRoute, nativeTrailerGameTitle, parseTrailerRootRoute, resolveTrailerAppSource, resolveTrailerSource, SHORTCUT_APP_ID_BOUNDARY } from "./source";
 import { deckyMetadataTrailerRuntimeFactory } from "./runtime";
+import { currentSteamLanguage } from "../steamLanguage";
 import { steamUiDocuments } from "../steam/steamUiHost";
 
 export const DEFAULT_TRAILER_SETTINGS: TrailerSettings = {
@@ -749,8 +750,9 @@ export class TrailerController {
       const identity = ${JSON.stringify(this.identity)};
       const ignFallback = ${JSON.stringify(this.ignFallback) ?? "undefined"};
       const translations = ${JSON.stringify(TRANSLATIONS)};
+      const contentLanguage = ${JSON.stringify(currentSteamLanguage())};
       const factory = ${deckyMetadataTrailerRuntimeFactory.toString()};
-      return factory(settings, ownerId, settingsRevision, translations, identity, ignFallback);
+      return factory(settings, ownerId, settingsRevision, translations, identity, ignFallback, contentLanguage);
     })()`;
   }
 

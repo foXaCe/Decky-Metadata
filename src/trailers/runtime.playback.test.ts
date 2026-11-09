@@ -34,7 +34,7 @@ const factory = source.slice(start, end).replace(/^export\s+/, '').replace(
 function setup({ width = 1280, height = 800, dpr = 1, quality = 'auto', hideLogoDuringTrailer = false,
   enabled = true, detailEnabled = true, homeEnabled = false, detailFadeInDelaySeconds = 3,
   homeFadeInDelaySeconds = 3, view = 'detail', fetchReply, mediaSourceType, urlType, domParserType,
-  clock, pageAppId = 570, sourceAppId = 570 } = {}) {
+  clock, pageAppId = 570, sourceAppId = 570, language = 'english' } = {}) {
   const settings = { enabled, detailEnabled, homeEnabled, audioEnabled: true, quality,
     hideLogoDuringTrailer, detailFadeInDelaySeconds, homeFadeInDelaySeconds };
   const identity = { view, pageAppId, sourceAppId,
@@ -62,7 +62,7 @@ function setup({ width = 1280, height = 800, dpr = 1, quality = 'auto', hideLogo
     MediaSource: mediaSourceType ?? { isTypeSupported: () => true }, DOMParser: domParserType, fetch: fetchReply,
   });
   const api = vm.runInContext(`(${factory})(${JSON.stringify(settings)},
-    'test-owner', 0, {en:{}}, ${JSON.stringify(identity)})`, context);
+    'test-owner', 0, {en:{}}, ${JSON.stringify(identity)}, undefined, ${JSON.stringify(language)})`, context);
   const runtime = new api.Runtime(settings, 'test-owner', 0);
   return { runtime, window, document, api, context };
 }
@@ -1034,6 +1034,42 @@ test('DASH descriptors honor fixed duration, template padding, offset and bounde
 });
 
 
+test('a trailer named for the active language wins over the highlighted one', async () => {
+  const pageAppId = 2147483649, sourceAppId = 15200;
+  const requested = [];
+  const h = setup({ pageAppId, sourceAppId, language: 'french', fetchReply: async (url) => {
+    requested.push(url);
+    return responseBody(JSON.stringify({ [sourceAppId]: { data: { movies: [
+      { id: 7, name: 'Matched trailer', highlight: true, mp4: { 720: 'https://steam.test/en720.mp4' } },
+      { id: 8, name: 'Bande-annonce (français)', mp4: { 720: 'https://steam.test/fr720.mp4' } },
+    ] } } }));
+  } });
+  class Hero {
+    constructor() {
+      this.tagName = 'DIV';
+      this.className = 'library-hero';
+      this.asset = `url(https://steam.test/customimages/${pageAppId}_hero.png)`;
+      this.classList = { add() {}, remove() {} };
+    }
+    getAttribute(name) { return name === 'style' ? this.asset : ''; }
+    getBoundingClientRect() { return { width: 1000, height: 400, top: 0, left: 0, right: 1000, bottom: 400 }; }
+  }
+  const hero = new Hero();
+  h.window.location = new URL(`https://steamloopback.host/routes/library/app/${pageAppId}`);
+  h.document.URL = h.window.location.href;
+  h.document.body = {};
+  h.document.querySelectorAll = selector => selector.includes('steam/apps') ? [hero] : [];
+  h.context.HTMLElement = Hero;
+  h.context.getComputedStyle = element => ({ backgroundImage: element.asset, display: 'block', visibility: 'visible' });
+  let attached;
+  h.runtime.attachVideo = (target, appId, candidates) => { attached = { target, appId, candidates }; };
+
+  await h.runtime.scan();
+
+  assert.deepEqual(requested, [`https://store.steampowered.com/api/appdetails?appids=${sourceAppId}&filters=movies&l=french`]);
+  assert.equal(attached.candidates[0].url, 'https://steam.test/fr720.mp4');
+});
+
 test('A matched shortcut requests movies by Steam source ID and attaches only to the shortcut hero', async () => {
   const pageAppId = 2147483649, sourceAppId = 15200;
   const requested = [];
@@ -1065,7 +1101,7 @@ test('A matched shortcut requests movies by Steam source ID and attaches only to
 
   await h.runtime.scan();
 
-  assert.deepEqual(requested, [`https://store.steampowered.com/api/appdetails?appids=${sourceAppId}&filters=movies`]);
+  assert.deepEqual(requested, [`https://store.steampowered.com/api/appdetails?appids=${sourceAppId}&filters=movies&l=english`]);
   assert.equal(attached.target, hero);
   assert.equal(attached.appId, pageAppId);
   assert.equal(attached.candidates[0].url, 'https://steam.test/matched720.mp4');
@@ -1296,7 +1332,7 @@ test('Native Steam pages use their own ID; subpages and mismatched heroes make n
     return responseBody(JSON.stringify({ 570: { data: { movies: [movie] } } }));
   });
   await h.runtime.scan();
-  assert.deepEqual(requested, ['https://store.steampowered.com/api/appdetails?appids=570&filters=movies']);
+  assert.deepEqual(requested, ['https://store.steampowered.com/api/appdetails?appids=570&filters=movies&l=english']);
   assert.equal(h.getAttached().target, h.hero);
   assert.equal(h.getAttached().appId, 570);
 });
@@ -1618,7 +1654,7 @@ test('Steam loopback URLs are rejected as direct files and HLS child playlists',
   const result = await h.runtime.getTrailer(570);
 
   assert.equal(result.ok, false);
-  assert.deepEqual(requestedUrls, ['https://store.steampowered.com/api/appdetails?appids=570&filters=movies']);
+  assert.deepEqual(requestedUrls, ['https://store.steampowered.com/api/appdetails?appids=570&filters=movies&l=english']);
   assert.throws(() => h.runtime.selectHlsVariant(`#EXTM3U
 #EXT-X-STREAM-INF:BANDWIDTH=1000,CODECS="avc1.640029",RESOLUTION=1280x720
 https://cdn.steamloopback.host/child.m3u8`,
