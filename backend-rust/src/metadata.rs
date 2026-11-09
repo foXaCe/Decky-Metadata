@@ -346,6 +346,28 @@ pub fn prepare_save(
             }
         }
     }
+    // A provider refresh must not drop a description that was already localized
+    // for this record: a failed or missing localized lookup would otherwise
+    // replace it with the English fallback.
+    let incoming_source = text(&value["source"]).trim().to_lowercase();
+    if value.get("localized_url").is_none()
+        && existing.get("localized_url").is_some()
+        && !matches!(incoming_source.as_str(), "steam" | "manual")
+    {
+        for key in [
+            "description",
+            "short_description",
+            "localized_source",
+            "localized_title",
+            "localized_url",
+            "localized_language",
+            "localized_attempted",
+        ] {
+            if let Some(kept) = existing.get(key) {
+                value[key] = kept.clone();
+            }
+        }
+    }
     Ok(stamp_updated(existing, sanitize(&value, index)?))
 }
 
@@ -984,6 +1006,24 @@ mod tests {
         assert_eq!(trusted["steam_store_state"], "delisted");
         assert_eq!(trusted["steam_news"][0]["id"], "a");
     }
+    #[test]
+    fn a_provider_refresh_keeps_an_existing_localized_description() {
+        let existing = json!({"title":"Game","source":"IGN","description":"Texte français",
+            "content_locale":"french","localized_source":"Wikipedia",
+            "localized_title":"Game","localized_url":"https://fr.wikipedia.org/wiki/Game",
+            "localized_language":"french","localized_attempted":"french"});
+        let saved = prepare_save(
+            &existing,
+            json!({"title":"Game","source":"IGN","description":"English text"}),
+            false,
+            None,
+            &Value::Null,
+        )
+        .unwrap();
+        assert_eq!(saved["description"], "Texte français");
+        assert_eq!(saved["localized_url"], "https://fr.wikipedia.org/wiki/Game");
+    }
+
     #[tokio::test]
     async fn wikipedia_creates_a_record_only_for_a_confirmed_video_game() {
         use crate::http::{Fixture, Http};
