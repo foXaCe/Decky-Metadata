@@ -160,6 +160,31 @@ pub async fn localized_intro(http: &Http, language: &str, game_title: &str) -> L
     }
 }
 
+/// Confirm that an article is about a video game through Wikidata
+/// (`instance of` = Q7889). Used before creating a record from Wikipedia so a
+/// tool or a service that happens to have an article is never saved as a game.
+pub async fn is_video_game(http: &Http, code: &str, article_title: &str) -> Option<bool> {
+    let mut url = Url::parse("https://www.wikidata.org/w/api.php").ok()?;
+    url.query_pairs_mut()
+        .append_pair("action", "wbgetentities")
+        .append_pair("sites", &format!("{code}wiki"))
+        .append_pair("titles", article_title)
+        .append_pair("props", "claims")
+        .append_pair("format", "json")
+        .append_pair("utf8", "1");
+    let payload = http
+        .json(url.as_str(), REQUEST_TIMEOUT, REQUEST_LIMIT)
+        .await
+        .ok()?;
+    let entity = payload["entities"]
+        .as_object()
+        .and_then(|entities| entities.values().next())?;
+    let claims = entity["claims"]["P31"].as_array()?;
+    Some(claims.iter().any(|claim| {
+        claim["mainsnak"]["datavalue"]["value"]["id"].as_str() == Some("Q7889")
+    }))
+}
+
 async fn search(http: &Http, code: &str, title: &str) -> Result<Vec<String>, ()> {
     let mut url = Url::parse(&format!("https://{code}.wikipedia.org/w/api.php")).map_err(|_| ())?;
     url.query_pairs_mut()
@@ -511,6 +536,35 @@ mod tests {
             Lookup::Unavailable
         ));
         http.assert_drained();
+    }
+
+    #[tokio::test]
+    async fn wikidata_confirms_whether_an_article_is_a_video_game() {
+        let url = |title: &str| {
+            let mut url = Url::parse("https://www.wikidata.org/w/api.php").unwrap();
+            url.query_pairs_mut()
+                .append_pair("action", "wbgetentities")
+                .append_pair("sites", "frwiki")
+                .append_pair("titles", title)
+                .append_pair("props", "claims")
+                .append_pair("format", "json")
+                .append_pair("utf8", "1");
+            url.to_string()
+        };
+        let claims = |id: &str| json!({"entities": {"Q1": {"claims": {"P31": [
+            {"mainsnak": {"datavalue": {"value": {"id": id}}}}
+        ]}}}});
+        let game = Http::fixtures(vec![Fixture::json(url("Example Quest"), claims("Q7889"))]);
+        assert_eq!(is_video_game(&game, "fr", "Example Quest").await, Some(true));
+        game.assert_drained();
+
+        let software = Http::fixtures(vec![Fixture::json(url("Example Tool"), claims("Q7397"))]);
+        assert_eq!(is_video_game(&software, "fr", "Example Tool").await, Some(false));
+        software.assert_drained();
+
+        let failed = Http::fixtures(vec![Fixture::failure(url("Example Quest"))]);
+        assert_eq!(is_video_game(&failed, "fr", "Example Quest").await, None);
+        failed.assert_drained();
     }
 
     #[test]

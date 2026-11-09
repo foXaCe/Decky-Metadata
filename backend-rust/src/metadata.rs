@@ -763,6 +763,49 @@ pub async fn localize_record(
         .map(Some)
 }
 
+/// Build a record from Wikipedia for a game that no other provider matched.
+///
+/// The record is returned unsaved so the scan commits it with the same guarded
+/// write as every other result. Wikidata must confirm the article is a video
+/// game, so an application or a service is never saved as a game.
+pub async fn create_from_wikipedia(
+    state: &crate::state::AppState,
+    base: &Value,
+) -> Result<Option<Value>, String> {
+    use crate::providers::wikipedia;
+    let language = state.http.content_language();
+    let title = text(&base["title"]);
+    if title.is_empty() {
+        return Ok(None);
+    }
+    let wikipedia::Lookup::Found(intro) =
+        wikipedia::localized_intro(&state.http, &language, &title).await
+    else {
+        return Ok(None);
+    };
+    let Some(code) = wikipedia::wikipedia_code(&language) else {
+        return Ok(None);
+    };
+    if wikipedia::is_video_game(&state.http, code, &intro.title).await != Some(true) {
+        return Ok(None);
+    }
+    let mut record = if base.is_object() {
+        base.clone()
+    } else {
+        json!({})
+    };
+    record["title"] = json!(title);
+    record["description"] = json!(intro.extract);
+    record["short_description"] = json!(intro.extract);
+    record["source"] = json!("Wikipedia");
+    record["localized_source"] = json!("Wikipedia");
+    record["localized_title"] = json!(intro.title);
+    record["localized_url"] = json!(intro.url);
+    record["localized_language"] = json!(language);
+    record["localized_attempted"] = json!(language);
+    Ok(Some(record))
+}
+
 /// Fill the description from a source written in the active language when Steam
 /// supplied none.
 ///
@@ -941,6 +984,72 @@ mod tests {
         assert_eq!(trusted["steam_store_state"], "delisted");
         assert_eq!(trusted["steam_news"][0]["id"], "a");
     }
+    #[tokio::test]
+    async fn wikipedia_creates_a_record_only_for_a_confirmed_video_game() {
+        use crate::http::{Fixture, Http};
+        use crate::state::AppState;
+        use reqwest::Url;
+        use std::sync::Arc;
+
+        let url = |pairs: &[(&str, &str)]| {
+            let mut url = Url::parse("https://fr.wikipedia.org/w/api.php").unwrap();
+            for (key, value) in pairs {
+                url.query_pairs_mut().append_pair(key, value);
+            }
+            url.to_string()
+        };
+        let wikidata = |title: &str| {
+            let mut url = Url::parse("https://www.wikidata.org/w/api.php").unwrap();
+            url.query_pairs_mut()
+                .append_pair("action", "wbgetentities")
+                .append_pair("sites", "frwiki")
+                .append_pair("titles", title)
+                .append_pair("props", "claims")
+                .append_pair("format", "json")
+                .append_pair("utf8", "1");
+            url.to_string()
+        };
+        let search = || url(&[("action","query"),("list","search"),
+            ("srsearch","Example Quest jeu vidéo"),("srlimit","5"),("format","json"),("utf8","1")]);
+        let extract = || url(&[("action","query"),("prop","extracts"),("exintro","1"),
+            ("explaintext","1"),("redirects","1"),("format","json"),("utf8","1"),
+            ("titles","Example Quest")]);
+        let http = Http::fixtures(vec![
+            Fixture::json(search(), json!({"query":{"search":[{"title":"Example Quest"}]}})),
+            Fixture::json(extract(), json!({"query":{"pages":{"1":{"extract":"Example Quest est un jeu vidéo d'aventure."}}}})),
+            Fixture::json(wikidata("Example Quest"), json!({"entities":{"Q1":{"claims":{"P31":[
+                {"mainsnak":{"datavalue":{"value":{"id":"Q7889"}}}}]}}}})),
+            Fixture::json(search(), json!({"query":{"search":[{"title":"Example Quest"}]}})),
+            Fixture::json(extract(), json!({"query":{"pages":{"1":{"extract":"Example Quest est un jeu vidéo d'aventure."}}}})),
+            Fixture::json(wikidata("Example Quest"), json!({"entities":{"Q1":{"claims":{"P31":[
+                {"mainsnak":{"datavalue":{"value":{"id":"Q7397"}}}}]}}}})),
+        ]);
+        let directory = TestDirectory::new();
+        let mut state = AppState::new(directory.env()).unwrap();
+        let inner = Arc::get_mut(&mut state).unwrap();
+        inner.cancel = http.cancel.clone();
+        inner.http = http;
+        state.initialize().await.unwrap();
+        state.http.set_content_language("french");
+
+        let created = create_from_wikipedia(&state, &json!({"title":"Example Quest"}))
+            .await
+            .unwrap()
+            .expect("a confirmed game is saved");
+        assert_eq!(created["source"], "Wikipedia");
+        assert_eq!(created["title"], "Example Quest");
+        assert_eq!(created["description"], "Example Quest est un jeu vidéo d'aventure.");
+        assert_eq!(created["localized_url"], "https://fr.wikipedia.org/wiki/Example_Quest");
+
+        // A software article is rejected even when its intro mentions games.
+        assert!(create_from_wikipedia(&state, &json!({"title":"Example Quest"}))
+            .await
+            .unwrap()
+            .is_none());
+        state.http.assert_drained();
+        state.shutdown().await.unwrap();
+    }
+
     #[test]
     fn localization_is_needed_only_for_unlocalized_provider_records() {
         let ign = json!({"title":"T","source":"IGN","description":"Text"});

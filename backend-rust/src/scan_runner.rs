@@ -662,6 +662,9 @@ async fn metadata_match(
             if metadata::complete(&enriched) {
                 return Ok(ScanResult::matched(enriched, "ign"));
             }
+            if let Some(created) = metadata::create_from_wikipedia(state, &enriched).await? {
+                return Ok(ScanResult::matched(created, "wikipedia"));
+            }
             partial = enriched;
         }
         return Ok(ScanResult::miss(Some(partial), "metadata"));
@@ -671,6 +674,14 @@ async fn metadata_match(
         .await?
         .filter(matching::py_truthy)
     else {
+        if let Some(created) = metadata::create_from_wikipedia(
+            state,
+            &json!({"title": title, "id": title}),
+        )
+        .await?
+        {
+            return Ok(ScanResult::matched(created, "wikipedia"));
+        }
         return Ok(ScanResult::miss(None, "ign"));
     };
     let enriched = metadata::with_steam_news(state, fetched, title, 10, true).await?;
