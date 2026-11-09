@@ -72,6 +72,11 @@ written in that language. Only the article intro is used, and the article URL is
 with the saved record so the source stays identifiable. Wikipedia text is
 licensed under CC BY-SA.
 
+If none of those sources has text in the active language, the English
+description is machine-translated through MyMemory (no account or key) and the
+translated text is stored on the record. Game description text, which is public
+store copy, is the only thing sent to that service.
+
 ## What you can see
 
 ### Game details and links

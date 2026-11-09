@@ -752,6 +752,14 @@ pub async fn with_steam_news(
     sanitize_for(state, &value).await
 }
 
+/// Bumped when the provider chain changes, so a record that failed with the old
+/// chain is tried again once.
+const LOCALIZATION_PIPELINE: &str = "2";
+
+fn localization_marker(language: &str) -> String {
+    format!("{language}#{LOCALIZATION_PIPELINE}")
+}
+
 /// A completed record whose description still comes from a provider without a
 /// localized version.
 pub fn needs_localization(record: &Value, language: &str) -> bool {
@@ -762,7 +770,13 @@ pub fn needs_localization(record: &Value, language: &str) -> bool {
     if source == "steam" || source == "manual" {
         return false;
     }
-    !text(&record["localized_attempted"]).eq_ignore_ascii_case(language)
+    if record["localized_url"]
+        .as_str()
+        .is_some_and(|url| !url.is_empty())
+    {
+        return false;
+    }
+    !text(&record["localized_attempted"]).eq_ignore_ascii_case(&localization_marker(language))
 }
 
 /// Refresh only the description of an existing record from Wikipedia.
@@ -783,6 +797,32 @@ pub async fn localize_record(
     save(state, &json!(app_id), updated, false, None)
         .await
         .map(Some)
+}
+
+/// Last resort: translate the English description with a keyless service so a
+/// reader never sees the English fallback when a translation is possible.
+async fn translate_fallback(
+    state: &crate::state::AppState,
+    mut value: Value,
+    language: &str,
+) -> Value {
+    let description = text(&value["description"]);
+    if description.is_empty() {
+        return value;
+    }
+    let target = crate::locale::tag(language);
+    let Some(translation) =
+        crate::providers::translate::translate(&state.http, &description, target).await
+    else {
+        return value;
+    };
+    value["description"] = json!(translation.text);
+    value["short_description"] = json!(translation.text);
+    value["localized_source"] = json!(crate::providers::translate::PROVIDER);
+    value["localized_url"] = json!("https://mymemory.translated.net/");
+    value["localized_language"] = json!(language);
+    value["localized_attempted"] = json!(localization_marker(language));
+    value
 }
 
 /// Build a record from Wikipedia for a game that no other provider matched.
@@ -820,7 +860,7 @@ pub async fn create_localized_record(
         record["localized_title"] = json!(gog.title);
         record["localized_url"] = json!(gog.url);
         record["localized_language"] = json!(language);
-        record["localized_attempted"] = json!(language);
+        record["localized_attempted"] = json!(localization_marker(&language));
         return Ok(Some(record));
     }
     let wikipedia::Lookup::Found(intro) =
@@ -847,7 +887,7 @@ pub async fn create_localized_record(
     record["localized_title"] = json!(intro.title);
     record["localized_url"] = json!(intro.url);
     record["localized_language"] = json!(language);
-    record["localized_attempted"] = json!(language);
+    record["localized_attempted"] = json!(localization_marker(&language));
     Ok(Some(record))
 }
 
@@ -871,7 +911,7 @@ async fn localize_description(
     if source == "steam" || source == "manual" {
         return value;
     }
-    if text(&value["localized_attempted"]).eq_ignore_ascii_case(&language) {
+    if text(&value["localized_attempted"]).eq_ignore_ascii_case(&localization_marker(&language)) {
         return value;
     }
     let title = if title.is_empty() {
@@ -884,7 +924,7 @@ async fn localize_description(
     if let Some(gog) =
         crate::providers::gog::localized_description(&state.http, crate::providers::gog::gog_locale(&language), &title).await
     {
-        value["localized_attempted"] = json!(language);
+        value["localized_attempted"] = json!(localization_marker(&language));
         value["localized_source"] = json!("GOG");
         value["localized_title"] = json!(gog.title);
         value["localized_url"] = json!(gog.url);
@@ -897,13 +937,11 @@ async fn localize_description(
         wikipedia::Lookup::Found(intro) => intro,
         // Remember a completed lookup with no usable article, but never a
         // request failure: a later scan may still succeed.
-        wikipedia::Lookup::NotFound => {
-            value["localized_attempted"] = json!(language);
-            return value;
+        wikipedia::Lookup::NotFound | wikipedia::Lookup::Unavailable => {
+            return translate_fallback(state, value, &language).await;
         }
-        wikipedia::Lookup::Unavailable => return value,
     };
-    value["localized_attempted"] = json!(language);
+    value["localized_attempted"] = json!(localization_marker(&language));
     value["description"] = json!(intro.extract);
     value["short_description"] = json!(intro.extract);
     value["localized_source"] = json!("Wikipedia");
@@ -1062,6 +1100,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn falls_back_to_machine_translation_when_no_provider_has_french_text() {
+        use crate::http::{Fixture, Http};
+        use crate::state::AppState;
+        use reqwest::Url;
+        use std::sync::Arc;
+
+        let mut catalog = Url::parse("https://catalog.gog.com/v1/catalog").unwrap();
+        catalog.query_pairs_mut()
+            .append_pair("query", "like:Neutral Racer")
+            .append_pair("limit", "5")
+            .append_pair("locale", "fr-FR");
+        let wiki = |query: &str| {
+            let mut url = Url::parse("https://fr.wikipedia.org/w/api.php").unwrap();
+            url.query_pairs_mut()
+                .append_pair("action", "query")
+                .append_pair("list", "search")
+                .append_pair("srsearch", query)
+                .append_pair("srlimit", "5")
+                .append_pair("format", "json")
+                .append_pair("utf8", "1");
+            url.to_string()
+        };
+        let description = "The hero must save the kingdom from the darkness spreading from the castle.";
+        let mut translation = Url::parse("https://api.mymemory.translated.net/get").unwrap();
+        translation.query_pairs_mut()
+            .append_pair("q", description)
+            .append_pair("langpair", "en|fr");
+
+        let http = Http::fixtures(vec![
+            Fixture::json(catalog.to_string(), json!({"products": []})),
+            Fixture::json(wiki("Neutral Racer jeu vidéo"), json!({"query":{"search":[]}})),
+            Fixture::json(wiki("Neutral Racer"), json!({"query":{"search":[]}})),
+            Fixture::json(
+                translation.to_string(),
+                json!({"responseStatus":200,"responseData":{"translatedText":
+                    "Le héros doit sauver le royaume des ténèbres qui s'étendent depuis le château."}}),
+            ),
+        ]);
+        let directory = TestDirectory::new();
+        let mut state = AppState::new(directory.env()).unwrap();
+        let inner = Arc::get_mut(&mut state).unwrap();
+        inner.cancel = http.cancel.clone();
+        inner.http = http;
+        state.initialize().await.unwrap();
+        state.http.set_content_language("french");
+
+        let localized = localize_description(
+            &state,
+            json!({"title":"Neutral Racer","source":"IGN","description":description}),
+            "Neutral Racer",
+        )
+        .await;
+        assert_eq!(localized["localized_source"], "MyMemory");
+        assert!(localized["description"].as_str().unwrap().starts_with("Le héros doit sauver"));
+        assert_eq!(localized["localized_attempted"], "french#2");
+        state.http.assert_drained();
+        state.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn a_gog_store_description_wins_over_wikipedia() {
         use crate::http::{Fixture, Http};
         use crate::state::AppState;
@@ -1192,9 +1290,12 @@ mod tests {
         assert!(!needs_localization(&ign, "english"));
         assert!(!needs_localization(&json!({"source":"Steam"}), "french"));
         assert!(!needs_localization(&json!({"source":"Manual"}), "french"));
-        let attempted = json!({"source":"IGN","localized_attempted":"french"});
+        let attempted = json!({"source":"IGN","localized_attempted":"french#2"});
         assert!(!needs_localization(&attempted, "french"));
         assert!(needs_localization(&attempted, "german"));
+        // A record that already carries a localized text is never retried.
+        let done = json!({"source":"IGN","localized_url":"https://fr.wikipedia.org/wiki/Game"});
+        assert!(!needs_localization(&done, "french"));
     }
 
     #[test]
