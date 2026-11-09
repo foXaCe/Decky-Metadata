@@ -238,6 +238,10 @@ pub fn sanitize(value: &Value, index: &Value) -> Result<Value, String> {
     if let Some(id) = safe_int(&value["hltb_game_id"]).filter(|id| *id > 0) {
         result["hltb_game_id"] = json!(id);
     }
+    let attempted = text(&value["localized_attempted"]);
+    if crate::locale::normalize(&attempted).is_some() {
+        result["localized_attempted"] = json!(attempted);
+    }
     // Localized description provenance. Kept only with a usable article URL so
     // the attribution cannot outlive the text it belongs to.
     if text(&value["localized_source"]) == "Wikipedia" {
@@ -726,6 +730,39 @@ pub async fn with_steam_news(
     sanitize_for(state, &value).await
 }
 
+/// A completed record whose description still comes from a provider without a
+/// localized version.
+pub fn needs_localization(record: &Value, language: &str) -> bool {
+    if language == "english" || !record.is_object() {
+        return false;
+    }
+    let source = text(&record["source"]).trim().to_lowercase();
+    if source == "steam" || source == "manual" {
+        return false;
+    }
+    !text(&record["localized_attempted"]).eq_ignore_ascii_case(language)
+}
+
+/// Refresh only the description of an existing record from Wikipedia.
+pub async fn localize_record(
+    state: &crate::state::AppState,
+    app_id: i64,
+    record: &Value,
+) -> Result<Option<Value>, String> {
+    let language = state.http.content_language();
+    if !needs_localization(record, &language) {
+        return Ok(None);
+    }
+    let title = text(&record["title"]);
+    let updated = localize_description(state, record.clone(), &title).await;
+    if updated == *record {
+        return Ok(None);
+    }
+    save(state, &json!(app_id), updated, false, None)
+        .await
+        .map(Some)
+}
+
 /// Fill the description from a source written in the active language when Steam
 /// supplied none.
 ///
@@ -746,9 +783,7 @@ async fn localize_description(
     if source == "steam" || source == "manual" {
         return value;
     }
-    let already = text(&value["localized_language"]).eq_ignore_ascii_case(&language)
-        && py_truthy(&value["localized_url"]);
-    if already {
+    if text(&value["localized_attempted"]).eq_ignore_ascii_case(&language) {
         return value;
     }
     let title = if title.is_empty() {
@@ -757,8 +792,12 @@ async fn localize_description(
         title.to_owned()
     };
     let Some(intro) = wikipedia::localized_intro(&state.http, &language, &title).await else {
+        // Remember the failed attempt for this language so a scan does not ask
+        // again for a title Wikipedia has no article for.
+        value["localized_attempted"] = json!(language);
         return value;
     };
+    value["localized_attempted"] = json!(language);
     value["description"] = json!(intro.extract);
     value["short_description"] = json!(intro.extract);
     value["localized_source"] = json!("Wikipedia");
@@ -898,6 +937,18 @@ mod tests {
         assert_eq!(trusted["steam_store_state"], "delisted");
         assert_eq!(trusted["steam_news"][0]["id"], "a");
     }
+    #[test]
+    fn localization_is_needed_only_for_unlocalized_provider_records() {
+        let ign = json!({"title":"T","source":"IGN","description":"Text"});
+        assert!(needs_localization(&ign, "french"));
+        assert!(!needs_localization(&ign, "english"));
+        assert!(!needs_localization(&json!({"source":"Steam"}), "french"));
+        assert!(!needs_localization(&json!({"source":"Manual"}), "french"));
+        let attempted = json!({"source":"IGN","localized_attempted":"french"});
+        assert!(!needs_localization(&attempted, "french"));
+        assert!(needs_localization(&attempted, "german"));
+    }
+
     #[test]
     fn localized_provenance_survives_sanitize_only_with_an_article_url() {
         let sanitized = sanitize(
