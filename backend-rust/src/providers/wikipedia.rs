@@ -24,6 +24,14 @@ const SEARCH_LIMIT: usize = 5;
 /// the next candidate is tried once.
 const MAX_EXTRACT_ATTEMPTS: usize = 2;
 
+pub enum Lookup {
+    Found(LocalizedIntro),
+    /// The lookup ran and no usable article exists for this title.
+    NotFound,
+    /// A request failed; the caller must not remember the attempt.
+    Unavailable,
+}
+
 pub struct LocalizedIntro {
     pub title: String,
     pub url: String,
@@ -104,43 +112,56 @@ fn game_term(code: &str) -> Option<&'static str> {
 }
 
 /// Look up an article in the reader's language and return its intro.
-pub async fn localized_intro(
-    http: &Http,
-    language: &str,
-    game_title: &str,
-) -> Option<LocalizedIntro> {
-    let code = wikipedia_code(language)?;
+pub async fn localized_intro(http: &Http, language: &str, game_title: &str) -> Lookup {
+    let Some(code) = wikipedia_code(language) else {
+        return Lookup::NotFound;
+    };
     let title = clean_game_title(game_title);
     if title.chars().count() < 2 {
-        return None;
+        return Lookup::NotFound;
     }
     let query = match game_term(code) {
         Some(term) => format!("{title} {term}"),
         None => title.clone(),
     };
-    let candidates = search(http, code, &query).await?;
+    let candidates = match search(http, code, &query).await {
+        Ok(candidates) => candidates,
+        Err(()) => return Lookup::Unavailable,
+    };
+    let mut request_failed = false;
     for candidate in ranked(candidates, &title)
         .into_iter()
         .take(MAX_EXTRACT_ATTEMPTS)
     {
-        let Some(extract) = extract(http, code, &candidate).await else {
+        let extract = match extract(http, code, &candidate).await {
+            Ok(extract) => extract,
+            Err(()) => {
+                request_failed = true;
+                continue;
+            }
+        };
+        let Some(extract) = extract else {
             continue;
         };
         let intro = trim_intro(&extract);
         if !looks_like_game(&intro) {
             continue;
         }
-        return Some(LocalizedIntro {
+        return Lookup::Found(LocalizedIntro {
             url: article_url(code, &candidate),
             title: candidate,
             extract: intro,
         });
     }
-    None
+    if request_failed {
+        Lookup::Unavailable
+    } else {
+        Lookup::NotFound
+    }
 }
 
-async fn search(http: &Http, code: &str, title: &str) -> Option<Vec<String>> {
-    let mut url = Url::parse(&format!("https://{code}.wikipedia.org/w/api.php")).ok()?;
+async fn search(http: &Http, code: &str, title: &str) -> Result<Vec<String>, ()> {
+    let mut url = Url::parse(&format!("https://{code}.wikipedia.org/w/api.php")).map_err(|_| ())?;
     url.query_pairs_mut()
         .append_pair("action", "query")
         .append_pair("list", "search")
@@ -151,18 +172,20 @@ async fn search(http: &Http, code: &str, title: &str) -> Option<Vec<String>> {
     let payload = http
         .json(url.as_str(), REQUEST_TIMEOUT, REQUEST_LIMIT)
         .await
-        .ok()?;
-    let items = payload["query"]["search"].as_array()?;
-    let titles: Vec<String> = items
+        .map_err(|_| ())?;
+    let items = payload["query"]["search"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    Ok(items
         .iter()
         .map(|item| py_string(&item["title"]))
         .filter(|title| !title.is_empty())
-        .collect();
-    (!titles.is_empty()).then_some(titles)
+        .collect())
 }
 
-async fn extract(http: &Http, code: &str, title: &str) -> Option<String> {
-    let mut url = Url::parse(&format!("https://{code}.wikipedia.org/w/api.php")).ok()?;
+async fn extract(http: &Http, code: &str, title: &str) -> Result<Option<String>, ()> {
+    let mut url = Url::parse(&format!("https://{code}.wikipedia.org/w/api.php")).map_err(|_| ())?;
     url.query_pairs_mut()
         .append_pair("action", "query")
         .append_pair("prop", "extracts")
@@ -175,11 +198,13 @@ async fn extract(http: &Http, code: &str, title: &str) -> Option<String> {
     let payload = http
         .json(url.as_str(), REQUEST_TIMEOUT, REQUEST_LIMIT)
         .await
-        .ok()?;
-    let pages = payload["query"]["pages"].as_object()?;
-    pages
+        .map_err(|_| ())?;
+    let Some(pages) = payload["query"]["pages"].as_object() else {
+        return Ok(None);
+    };
+    Ok(pages
         .values()
-        .find_map(|page| page["extract"].as_str().map(str::to_owned))
+        .find_map(|page| page["extract"].as_str().map(str::to_owned)))
 }
 
 /// Order candidates by title similarity, then by plain-title preference.
@@ -274,7 +299,9 @@ fn has_negative_hint(title: &str) -> bool {
 /// The intro must describe a game and must not be about a series.
 fn looks_like_game(intro: &str) -> bool {
     let opening: String = intro.chars().take(90).collect::<String>().to_lowercase();
-    let head: String = intro.chars().take(140).collect::<String>().to_lowercase();
+    // Foreign titles and parentheticals can push the genre well past the first
+    // line, so the game keyword is searched in the whole lead paragraph.
+    let head: String = intro.chars().take(600).collect::<String>().to_lowercase();
     if ["série", "serie", "series", "franchise", "saga"]
         .iter()
         .any(|hint| opening.contains(hint))
@@ -401,7 +428,9 @@ mod tests {
                 ),
             ),
         ]);
-        let intro = localized_intro(&http, "french", "Neutral Racer").await.unwrap();
+        let Lookup::Found(intro) = localized_intro(&http, "french", "Neutral Racer").await else {
+            panic!("expected a localized intro");
+        };
         assert_eq!(intro.title, "Neutral Racer");
         assert_eq!(intro.url, "https://fr.wikipedia.org/wiki/Neutral_Racer");
         assert!(intro.extract.starts_with("Neutral Racer est un jeu vidéo"));
@@ -427,7 +456,9 @@ mod tests {
                 ),
             ),
         ]);
-        let intro = localized_intro(&http, "french", "Example Quest").await.unwrap();
+        let Lookup::Found(intro) = localized_intro(&http, "french", "Example Quest").await else {
+            panic!("expected a localized intro");
+        };
         assert_eq!(intro.title, "Example Quest (jeu vidéo)");
         assert!(intro.url.contains("Example_Quest_"));
         http.assert_drained();
@@ -439,14 +470,20 @@ mod tests {
             search_url("fr", "Example Quest jeu vidéo"),
             search_payload(&["Example Quest (film)"]),
         )]);
-        assert!(localized_intro(&http, "french", "Example Quest").await.is_none());
+        assert!(matches!(
+            localized_intro(&http, "french", "Example Quest").await,
+            Lookup::NotFound
+        ));
         http.assert_drained();
     }
 
     #[tokio::test]
     async fn does_not_call_wikipedia_for_english() {
         let http = Http::fixtures(vec![]);
-        assert!(localized_intro(&http, "english", "Neutral Racer").await.is_none());
+        assert!(matches!(
+            localized_intro(&http, "english", "Neutral Racer").await,
+            Lookup::NotFound
+        ));
         http.assert_drained();
     }
 
@@ -456,7 +493,23 @@ mod tests {
             search_url("fr", "Neutral Racer jeu vidéo"),
             search_payload(&["Unrelated Article", "Another Subject"]),
         )]);
-        assert!(localized_intro(&http, "french", "Neutral Racer").await.is_none());
+        assert!(matches!(
+            localized_intro(&http, "french", "Neutral Racer").await,
+            Lookup::NotFound
+        ));
+        http.assert_drained();
+    }
+
+    #[tokio::test]
+    async fn reports_a_failed_request_as_unavailable() {
+        let http = Http::fixtures(vec![Fixture::failure(search_url(
+            "fr",
+            "Neutral Racer jeu vidéo",
+        ))]);
+        assert!(matches!(
+            localized_intro(&http, "french", "Neutral Racer").await,
+            Lookup::Unavailable
+        ));
         http.assert_drained();
     }
 
