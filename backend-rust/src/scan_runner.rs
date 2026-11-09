@@ -396,7 +396,9 @@ async fn run_targets(state: Arc<AppState>, pipeline: Pipeline, targets: Vec<Targ
 
         let snapshot = target.metadata.take().unwrap_or(Value::Null);
         let result = match pipeline {
-            Pipeline::Metadata => metadata_match(&state, &target, &mut delisted_refreshed).await,
+            Pipeline::Metadata => {
+                metadata_match(&state, &target, &snapshot, &mut delisted_refreshed).await
+            }
             Pipeline::Activity => activity_match(&state, snapshot.clone(), &target.title).await,
         };
         let mut result = match result {
@@ -562,15 +564,12 @@ impl ScanResult {
 async fn metadata_match(
     state: &AppState,
     target: &Target,
+    snapshot: &Value,
     delisted_refreshed: &mut bool,
 ) -> Result<ScanResult, String> {
     // A complete record that only lacks a localized description needs no
     // provider refresh: fill the description in place.
-    if let Some(existing) = target
-        .metadata
-        .as_ref()
-        .filter(|record| metadata::complete(record))
-    {
+    if let Some(existing) = Some(snapshot).filter(|record| metadata::complete(record)) {
         if metadata::needs_localization(existing, &state.http.content_language()) {
             let saved = metadata::localize_record(
                 state,
@@ -1056,6 +1055,48 @@ mod tests {
             .unwrap(),
             1
         );
+        state.http.assert_drained();
+        state.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn scan_localizes_an_existing_record_without_refetching_providers() {
+        let wiki = |pairs: &[(&str, &str)]| {
+            let mut url = Url::parse("https://fr.wikipedia.org/w/api.php").unwrap();
+            for (key, value) in pairs {
+                url.query_pairs_mut().append_pair(key, value);
+            }
+            url.to_string()
+        };
+        let fixtures = vec![
+            Fixture::json(
+                wiki(&[("action","query"),("list","search"),("srsearch","Neutral Racer jeu vidéo"),
+                       ("srlimit","5"),("format","json"),("utf8","1")]),
+                json!({"query":{"search":[{"title":"Neutral Racer"}]}}),
+            ),
+            Fixture::json(
+                wiki(&[("action","query"),("prop","extracts"),("exintro","1"),("explaintext","1"),
+                       ("redirects","1"),("format","json"),("utf8","1"),("titles","Neutral Racer")]),
+                json!({"query":{"pages":{"1":{"extract":"Neutral Racer est un jeu vidéo de course."}}}}),
+            ),
+        ];
+        let (_directory, state) = test_state(fixtures).await;
+        state.http.set_content_language("french");
+        set_record(&state, 1, json!({"title":"Neutral Racer","source":"IGN",
+            "description":"English text","content_locale":"french"})).await;
+        start_scan_missing(
+            Arc::clone(&state),
+            &json!([{"appid": 1, "name": "Neutral Racer"}]),
+        )
+        .await
+        .unwrap();
+        state.jobs.drain().await;
+        let storage = state.store().await.unwrap();
+        let record = &storage.data()["metadata"]["1"];
+        assert_eq!(record["localized_source"], "Wikipedia");
+        assert_eq!(record["description"], "Neutral Racer est un jeu vidéo de course.");
+        assert_eq!(record["source"], "IGN");
+        drop(storage);
         state.http.assert_drained();
         state.shutdown().await.unwrap();
     }
@@ -1832,7 +1873,9 @@ mod tests {
             metadata: None,
         };
         let scanning = Arc::clone(&state);
-        let task = tokio::spawn(async move { metadata_match(&scanning, &target, &mut false).await });
+        let task = tokio::spawn(async move {
+            metadata_match(&scanning, &target, &Value::Null, &mut false).await
+        });
         tokio::time::timeout(Duration::from_secs(2), gate.started.notified())
             .await
             .unwrap();
