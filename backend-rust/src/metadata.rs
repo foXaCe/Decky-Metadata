@@ -238,6 +238,17 @@ pub fn sanitize(value: &Value, index: &Value) -> Result<Value, String> {
     if let Some(id) = safe_int(&value["hltb_game_id"]).filter(|id| *id > 0) {
         result["hltb_game_id"] = json!(id);
     }
+    // Localized description provenance. Kept only with a usable article URL so
+    // the attribution cannot outlive the text it belongs to.
+    if text(&value["localized_source"]) == "Wikipedia" {
+        let url = https_url(&text(&value["localized_url"]));
+        if !url.is_empty() {
+            result["localized_source"] = json!("Wikipedia");
+            result["localized_title"] = json!(text(&value["localized_title"]));
+            result["localized_url"] = json!(url);
+            result["localized_language"] = json!(text(&value["localized_language"]));
+        }
+    }
     Ok(result)
 }
 
@@ -888,6 +899,27 @@ mod tests {
         assert_eq!(trusted["steam_news"][0]["id"], "a");
     }
     #[test]
+    fn localized_provenance_survives_sanitize_only_with_an_article_url() {
+        let sanitized = sanitize(
+            &json!({"title":"Game","source":"IGN","description":"Texte",
+                "localized_source":"Wikipedia","localized_title":"Game",
+                "localized_url":"https://fr.wikipedia.org/wiki/Game",
+                "localized_language":"french"}),
+            &Value::Null,
+        )
+        .unwrap();
+        assert_eq!(sanitized["localized_source"], "Wikipedia");
+        assert_eq!(sanitized["localized_url"], "https://fr.wikipedia.org/wiki/Game");
+        assert_eq!(sanitized["localized_language"], "french");
+        let dropped = sanitize(
+            &json!({"title":"Game","localized_source":"Wikipedia"}),
+            &Value::Null,
+        )
+        .unwrap();
+        assert!(dropped.get("localized_source").is_none());
+    }
+
+    #[test]
     fn records_only_count_for_the_language_they_were_fetched_in() {
         let english = json!({"title":"A","source":"IGN","content_locale":"english"});
         assert!(complete_in(&english, "english"));
@@ -1027,7 +1059,7 @@ mod tests {
         let search = wiki_url(&[
             ("action", "query"),
             ("list", "search"),
-            ("srsearch", "Neutral Racer"),
+            ("srsearch", "Neutral Racer jeu vidéo"),
             ("srlimit", "5"),
             ("format", "json"),
             ("utf8", "1"),

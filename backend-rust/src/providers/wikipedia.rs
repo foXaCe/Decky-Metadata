@@ -66,6 +66,43 @@ pub fn wikipedia_code(language: &str) -> Option<&'static str> {
     })
 }
 
+/// Localized "video game" term, appended to the search so disambiguated game
+/// articles rank next to a same-named series or film page.
+const GAME_TERMS: &[(&str, &str)] = &[
+    ("fr", "jeu vidéo"),
+    ("de", "Computerspiel"),
+    ("es", "videojuego"),
+    ("it", "videogioco"),
+    ("pt", "jogo eletrônico"),
+    ("ja", "コンピュータゲーム"),
+    ("ru", "компьютерная игра"),
+    ("uk", "відеогра"),
+    ("pl", "gra komputerowa"),
+    ("nl", "computerspel"),
+    ("tr", "video oyunu"),
+    ("sv", "datorspel"),
+    ("da", "computerspil"),
+    ("fi", "videopeli"),
+    ("no", "videospill"),
+    ("cs", "počítačová hra"),
+    ("hu", "videojáték"),
+    ("ro", "joc video"),
+    ("bg", "видеоигра"),
+    ("el", "βιντεοπαιχνίδι"),
+    ("th", "วิดีโอเกม"),
+    ("vi", "trò chơi điện tử"),
+    ("id", "permainan video"),
+    ("zh", "电子游戏"),
+    ("ko", "비디오 게임"),
+];
+
+fn game_term(code: &str) -> Option<&'static str> {
+    GAME_TERMS
+        .iter()
+        .find(|(language, _)| *language == code)
+        .map(|(_, term)| *term)
+}
+
 /// Look up an article in the reader's language and return its intro.
 pub async fn localized_intro(
     http: &Http,
@@ -77,7 +114,11 @@ pub async fn localized_intro(
     if title.chars().count() < 2 {
         return None;
     }
-    let candidates = search(http, code, &title).await?;
+    let query = match game_term(code) {
+        Some(term) => format!("{title} {term}"),
+        None => title.clone(),
+    };
+    let candidates = search(http, code, &query).await?;
     for candidate in ranked(candidates, &title)
         .into_iter()
         .take(MAX_EXTRACT_ATTEMPTS)
@@ -349,7 +390,7 @@ mod tests {
     async fn returns_the_localized_intro_and_article_url() {
         let http = Http::fixtures(vec![
             Fixture::json(
-                search_url("fr", "Neutral Racer"),
+                search_url("fr", "Neutral Racer jeu vidéo"),
                 search_payload(&["Neutral Racer"]),
             ),
             Fixture::json(
@@ -371,7 +412,7 @@ mod tests {
     async fn rejects_a_series_article_and_tries_the_next_candidate() {
         let http = Http::fixtures(vec![
             Fixture::json(
-                search_url("fr", "Example Quest"),
+                search_url("fr", "Example Quest jeu vidéo"),
                 search_payload(&["Example Quest", "Example Quest (jeu vidéo)"]),
             ),
             Fixture::json(
@@ -395,7 +436,7 @@ mod tests {
     #[tokio::test]
     async fn skips_non_game_candidates() {
         let http = Http::fixtures(vec![Fixture::json(
-            search_url("fr", "Example Quest"),
+            search_url("fr", "Example Quest jeu vidéo"),
             search_payload(&["Example Quest (film)"]),
         )]);
         assert!(localized_intro(&http, "french", "Example Quest").await.is_none());
@@ -412,7 +453,7 @@ mod tests {
     #[tokio::test]
     async fn ignores_unrelated_search_results() {
         let http = Http::fixtures(vec![Fixture::json(
-            search_url("fr", "Neutral Racer"),
+            search_url("fr", "Neutral Racer jeu vidéo"),
             search_payload(&["Unrelated Article", "Another Subject"]),
         )]);
         assert!(localized_intro(&http, "french", "Neutral Racer").await.is_none());
