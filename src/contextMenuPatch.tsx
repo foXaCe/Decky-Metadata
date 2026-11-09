@@ -201,13 +201,23 @@ const insertOurEntry = (items: any[], appId: number): boolean => {
   const extra = extraEntryFactory?.(appId);
   if (extra) entries.push(extra);
 
-  const propertiesIndex = items.findIndex((node) =>
-    findInReactTree(
-      node,
-      (x) => x?.onSelected?.toString?.().includes("AppProperties")
-    )
-  );
-  const insertAt = propertiesIndex >= 0 ? propertiesIndex : items.length;
+  // "Properties..." is the anchor: our entries go just above it. Steam has
+  // moved that item between builds, so also match its label when the handler
+  // cannot be recognised.
+  const isProperties = (node: any) =>
+    Boolean(findInReactTree(node, (x) => x?.onSelected?.toString?.().includes("AppProperties")))
+    || Boolean(
+      findInReactTree(
+        node,
+        (x) =>
+          typeof x?.props?.children === "string"
+          && /^(propri[eé]t[eé]s|properties)\.\.\.$/i.test(x.props.children.trim()),
+      ),
+    );
+  const propertiesIndex = items.findIndex(isProperties);
+  const insertAt = propertiesIndex >= 0
+    ? propertiesIndex
+    : Math.max(items.length - 1, 0);
   items.splice(insertAt, 0, ...entries);
   return true;
 };
