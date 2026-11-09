@@ -23,10 +23,16 @@ const SEARCH_LIMIT: usize = 5;
 /// At most two extracts are fetched per game: a series article is rejected and
 /// the next candidate is tried once.
 const MAX_EXTRACT_ATTEMPTS: usize = 2;
-/// Wikimedia asks clients to keep a low request rate; a library scan issues a
-/// few requests per game.
-const MIN_REQUEST_INTERVAL: Duration = Duration::from_millis(250);
-const RETRY_DELAY: Duration = Duration::from_millis(1000);
+/// Wikimedia throttles bursts of anonymous API calls; a library scan issues a
+/// few requests per game, so keep the run under the rate limit.
+#[cfg(not(test))]
+const MIN_REQUEST_INTERVAL: Duration = Duration::from_millis(1500);
+#[cfg(test)]
+const MIN_REQUEST_INTERVAL: Duration = Duration::from_millis(1);
+#[cfg(not(test))]
+const RETRY_DELAY: Duration = Duration::from_millis(4000);
+#[cfg(test)]
+const RETRY_DELAY: Duration = Duration::from_millis(1);
 
 static NEXT_REQUEST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
@@ -42,7 +48,15 @@ async fn fetch_json(http: &Http, url: &str) -> Result<serde_json::Value, ()> {
         }
         match http.json(url, REQUEST_TIMEOUT, REQUEST_LIMIT).await {
             Ok(payload) => return Ok(payload),
-            Err(_) => continue,
+            Err(error) => {
+                crate::logging::event(
+                    "wikipedia",
+                    "request failed",
+                    serde_json::json!({"url": url.split('?').next().unwrap_or(url), "error": error}),
+                    log::Level::Warn,
+                );
+                continue;
+            }
         }
     }
     Err(())
