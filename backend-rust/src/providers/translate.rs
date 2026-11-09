@@ -55,10 +55,18 @@ async fn translate_chunk(http: &Http, text: &str, target_language: &str) -> Opti
     url.query_pairs_mut()
         .append_pair("q", text)
         .append_pair("langpair", &format!("en|{target_language}"));
-    let payload = http
-        .json(url.as_str(), REQUEST_TIMEOUT, REQUEST_LIMIT)
-        .await
-        .ok()?;
+    let payload = match http.json(url.as_str(), REQUEST_TIMEOUT, REQUEST_LIMIT).await {
+        Ok(payload) => payload,
+        Err(error) => {
+            crate::logging::event(
+                "translate",
+                "request failed",
+                serde_json::json!({"error": error}),
+                log::Level::Warn,
+            );
+            return None;
+        }
+    };
     if payload["responseStatus"].as_i64().is_some_and(|status| status != 200) {
         crate::logging::event(
             "translate",
