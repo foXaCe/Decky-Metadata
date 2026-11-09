@@ -10,6 +10,7 @@ import contextMenuPatch, {
   setExtraContextMenuEntry,
 } from "./contextMenuPatch";
 import { artworkMenuItem } from "./artworkMenu";
+import { ArtworkPage } from "./ArtworkPage";
 import { refreshLocale } from "./i18n";
 import { frontendLog, getDebugLogging } from "./backend";
 import * as log from "./log";
@@ -36,6 +37,7 @@ import {
 } from "./steam";
 
 const METADATA_ROUTE = "/decky-metadata/:appid";
+const ARTWORK_ROUTE = "/decky-metadata-artwork/:appid";
 
 const installInPlaceReloadGuard = (onFailedReload: () => void) => {
   const loader = (globalThis as any).DeckyPluginLoader;
@@ -115,6 +117,7 @@ export default definePlugin(() => {
   const menuPatch = contextMenuPatch(LibraryContextMenu);
 
   routerHook.addRoute(METADATA_ROUTE, () => <MetadataPage />, { exact: true });
+  routerHook.addRoute(ARTWORK_ROUTE, () => <ArtworkPage />, { exact: true });
 
   return {
     // Plugin identity used by Decky Loader (must match plugin.json "name" so
@@ -184,6 +187,7 @@ export default definePlugin(() => {
       reloadGuard.unpatch();
       try {
         routerHook.removeRoute(METADATA_ROUTE);
+      routerHook.removeRoute(ARTWORK_ROUTE);
       } catch (error) {
         log.error("patch", "route remove failed", error);
       }

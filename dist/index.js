@@ -546,6 +546,10 @@ const en = {
     "editor.artwork.loading": "Loading artwork...",
     "editor.artwork.empty": "No artwork found",
     "editor.artwork.applied": "Artwork applied",
+    "editor.artwork.cleared": "Artwork cleared",
+    "editor.artwork.pageTitle": "Artwork — {{game}}",
+    "editor.artwork.reload": "Search again",
+    "editor.artwork.clear": "Remove this image",
     "editor.artwork.slot.portrait": "Portrait",
     "editor.artwork.slot.landscape": "Wide capsule",
     "editor.artwork.slot.hero": "Hero",
@@ -643,7 +647,7 @@ const en = {
     "hltbSearch.mainStory": "Main Story {{hours}} hours",
     "hltbSearch.noMainStory": "No Main Story time yet",
     "contextMenu.edit": "Decky metadata...",
-    "contextMenu.artwork": "Download artwork (SteamGridDB)",
+    "contextMenu.artwork": "Change artwork...",
     "conflict.enabled": "{{plugin}} is enabled in Decky Loader. Disable that plugin to use {{feature}} here.",
     "conflict.enabledSaved": " Your setting is saved; this feature will resume when the other plugin is disabled.",
     "conflict.detectionUnavailable": "Could not check for conflicting plugins. Use only one {{feature}} provider at a time.",
@@ -900,6 +904,10 @@ const fr = {
     "editor.artwork.loading": "Chargement des illustrations…",
     "editor.artwork.empty": "Aucune illustration trouvée",
     "editor.artwork.applied": "Illustration appliquée",
+    "editor.artwork.cleared": "Illustration supprimée",
+    "editor.artwork.pageTitle": "Illustrations — {{game}}",
+    "editor.artwork.reload": "Rechercher à nouveau",
+    "editor.artwork.clear": "Supprimer cette image",
     "editor.artwork.slot.portrait": "Portrait",
     "editor.artwork.slot.landscape": "Vignette paysage",
     "editor.artwork.slot.hero": "Bannière",
@@ -997,7 +1005,7 @@ const fr = {
     "hltbSearch.mainStory": "Histoire principale : {{hours}} heures",
     "hltbSearch.noMainStory": "Pas encore de temps pour l'histoire principale",
     "contextMenu.edit": "Métadonnées Decky…",
-    "contextMenu.artwork": "Télécharger les illustrations (SteamGridDB)",
+    "contextMenu.artwork": "Modifier les illustrations…",
     "conflict.enabled": "{{plugin}} est activé dans Decky Loader. Désactivez ce plugin pour utiliser {{feature}} ici.",
     "conflict.enabledSaved": " Votre réglage est enregistré ; cette fonction reprendra lorsque l'autre plugin sera désactivé.",
     "conflict.detectionUnavailable": "Impossible de vérifier les plugins en conflit. N'utilisez qu'un seul fournisseur de {{feature}} à la fois.",
@@ -1221,21 +1229,21 @@ const useLocale = () => {
  * invalidates the library cache, so the plugin never touches `config/grid`.
  */
 /** Steam artwork slots: 0 portrait grid, 1 hero, 2 logo, 3 landscape grid. */
-const SLOTS = [
+const SLOTS$1 = [
     ["portrait", 0],
     ["hero", 1],
     ["logo", 2],
     ["landscape", 3],
 ];
-const steamApps = () => globalThis?.SteamClient?.Apps;
+const steamApps$1 = () => globalThis?.SteamClient?.Apps;
 /** Hand the downloaded images to Steam for one shortcut. */
 const applyArtwork = async (appId, payload) => {
-    const api = steamApps();
+    const api = steamApps$1();
     if (!api?.SetCustomArtworkForApp) {
         throw new Error("Steam artwork API is unavailable");
     }
     let applied = 0;
-    for (const [key, type] of SLOTS) {
+    for (const [key, type] of SLOTS$1) {
         const data = payload[key];
         if (!data)
             continue;
@@ -1258,6 +1266,22 @@ const applyArtwork = async (appId, payload) => {
     }
     return applied;
 };
+/** Apply one chosen gallery image to one Steam slot. */
+const applyArtworkAsset = async (appId, kind, url) => {
+    const api = steamApps$1();
+    if (!api?.SetCustomArtworkForApp) {
+        throw new Error("Steam artwork API is unavailable");
+    }
+    const slot = SLOTS$1.find(([key]) => key === kind);
+    if (!slot)
+        throw new Error("Unknown artwork slot");
+    const data = await downloadArtwork(url);
+    if (!data)
+        throw new Error("Artwork download failed");
+    await api.SetCustomArtworkForApp(appId, data, "png", slot[1]);
+};
+/** Gallery candidates for every Steam slot. */
+const artworkCandidates = async (appId, title, steamAppId) => listArtwork(appId, title, steamAppId ?? null);
 /** Shortcuts with at least one missing artwork slot. */
 const gamesMissingArtwork = async (appIds) => {
     if (appIds.length === 0)
@@ -19185,17 +19209,77 @@ const MetadataPage = () => {
                                             }, style: fieldStyle }), SP_JSX.jsx(FocusableButton, { className: `DialogButton ${editorFocusTargetClassName}`, disabled: entryBusy, onClick: () => applySteamAppId(), style: editorAppIdButtonStyle, children: t("editor.steamAppId.apply") })] })] }) }) }), SP_JSX.jsx(DFL.PanelSection, { title: t("editor.shortcutName.title"), children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: rowStackStyle, children: [SP_JSX.jsx(DFL.Field, { className: `${editorFocusTargetClassName} decky-metadata-editor__shortcut-name`, focusable: true, highlightOnFocus: false, childrenLayout: "below", padding: "none", bottomSeparator: "none", children: SP_JSX.jsxs("div", { style: rowStackStyle, children: [SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.current", { name: currentShortcutName ?? t("editor.shortcutName.noNative") }) }), steamStoreName ? SP_JSX.jsx("div", { style: compactTextStyle, children: `Steam: ${steamStoreName}` }) : null, steamNameLoading ? SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.loading") }) : null, steamNameUnavailable ? SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.noOfficial") }) : null, shortcutManagementError ? SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.unavailable") }) : null, !shortcutManagementError && shortcutManagement?.eligible && !hasShortcutNameApi() ? SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.apiUnavailable") }) : null, !shortcutManagementError && shortcutManagement?.reason === "shortcut_not_found" ? SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.notFound") }) : null, !shortcutManagementError && shortcutManagement?.reason === "derived_shortcut_id" ? SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.derivedId") }) : null, !shortcutManagementError && shortcutManagement?.eligible && currentShortcutName === steamStoreName && steamStoreName ? SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.matches") }) : null, shortcutStatus === "diverged" ? SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.diverged") }) : null, !steamNameLoading && !steamStoreName && hasSteamMatch && !steamNameUnavailable ? SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.noOfficial") }) : null] }) }), canUseSteamName ? (SP_JSX.jsx(FocusableButton, { className: `DialogButton ${editorFocusTargetClassName}`, disabled: entryBusy, onClick: showUseSteamNameModal, style: editorAppIdButtonStyle, children: t("editor.shortcutName.useSteam") })) : null, shortcutManagement?.eligible && shortcutStatus === "managed" && shortcutManagement.state ? (SP_JSX.jsx(FocusableButton, { className: `DialogButton ${editorFocusTargetClassName}`, disabled: entryBusy || !hasShortcutNameApi(), onClick: showRestoreShortcutNameModal, style: editorAppIdButtonStyle, children: t("editor.shortcutName.restore") })) : null, shortcutManagement?.eligible && shortcutStatus === "diverged" ? (SP_JSX.jsx(FocusableButton, { className: `DialogButton ${editorFocusTargetClassName}`, disabled: entryBusy, onClick: showForgetShortcutNameHistoryModal, style: editorAppIdButtonStyle, children: t("editor.shortcutName.forget") })) : null] }) }) })] }) }));
 };
 
-const applyForApp = async (appId) => {
-    try {
-        const count = await fetchAndApplyArtwork(appId, appName(appId), Number(metadataCache[String(appId)]?.steam_appid) || null);
-        toastSuccess(t("qam.artwork.title"), t("toast.artwork.applied", { count }));
-    }
-    catch (error) {
-        toastError(t("qam.artwork.title"), String(error));
-    }
+/** Artwork page entry for the library context menu. */
+const artworkMenuItem = (appId) => (SP_JSX.jsx(DFL.MenuItem, { onSelected: () => DFL.Navigation.Navigate(`/decky-metadata-artwork/${appId}`), children: t("contextMenu.artwork") }, "decky-metadata-artwork"));
+
+const SLOTS = [
+    { kind: "portrait", label: "editor.artwork.slot.portrait", type: 0, width: 120, height: 180 },
+    { kind: "landscape", label: "editor.artwork.slot.landscape", type: 3, width: 200, height: 94 },
+    { kind: "hero", label: "editor.artwork.slot.hero", type: 1, width: 240, height: 78 },
+    { kind: "logo", label: "editor.artwork.slot.logo", type: 2, width: 200, height: 90 },
+];
+const steamApps = () => globalThis?.SteamClient?.Apps;
+const ArtworkPage = () => {
+    const { appid } = DFL.useParams();
+    const appId = Number(appid);
+    const [slot, setSlot] = SP_REACT.useState(SLOTS[0]);
+    const [candidates, setCandidates] = SP_REACT.useState(null);
+    const [loading, setLoading] = SP_REACT.useState(false);
+    const [busy, setBusy] = SP_REACT.useState(false);
+    const title = appName(appId);
+    const load = SP_REACT.useCallback(async () => {
+        setLoading(true);
+        try {
+            const steamAppId = Number(metadataCache[String(appId)]?.steam_appid) || null;
+            setCandidates(await artworkCandidates(appId, title, steamAppId));
+        }
+        catch (error) {
+            toastError(t("qam.artwork.title"), String(error));
+        }
+        finally {
+            setLoading(false);
+        }
+    }, [appId, title]);
+    SP_REACT.useEffect(() => {
+        void load();
+    }, [load]);
+    const apply = async (candidate) => {
+        if (busy)
+            return;
+        setBusy(true);
+        try {
+            await applyArtworkAsset(appId, slot.kind, candidate.url);
+            toastSuccess(t("editor.artwork.applied"), "");
+        }
+        catch (error) {
+            toastError(t("qam.artwork.title"), String(error));
+        }
+        finally {
+            setBusy(false);
+        }
+    };
+    const clear = async () => {
+        if (busy)
+            return;
+        const api = steamApps();
+        if (!api?.ClearCustomArtworkForApp)
+            return;
+        setBusy(true);
+        try {
+            await api.ClearCustomArtworkForApp(appId, slot.type);
+            await new Promise((resolve) => window.setTimeout(resolve, 500));
+            toastSuccess(t("editor.artwork.cleared"), "");
+        }
+        catch (error) {
+            toastError(t("qam.artwork.title"), String(error));
+        }
+        finally {
+            setBusy(false);
+        }
+    };
+    const items = candidates?.[slot.kind] ?? [];
+    return (SP_JSX.jsx(DFL.ScrollPanel, { children: SP_JSX.jsxs("div", { style: pageStyle, children: [SP_JSX.jsx(DFL.Focusable, { className: "DialogButton", onActivate: () => DFL.Navigation.NavigateBack(), style: pageTitleStyle, children: t("editor.artwork.pageTitle", { game: title }) }), SP_JSX.jsx(DFL.PanelSection, { children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { display: "flex", flexWrap: "wrap", gap: 8 }, children: SLOTS.map((entry) => (SP_JSX.jsx(FocusableButton, { className: "DialogButton", onClick: () => setSlot(entry), style: entry.kind === slot.kind ? { outline: "2px solid #1a9fff" } : undefined, children: t(entry.label) }, entry.kind))) }) }) }), SP_JSX.jsx(DFL.PanelSection, { children: loading ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.artwork.loading") }) })) : items.length === 0 ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.artwork.empty") }) })) : (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: { display: "flex", flexWrap: "wrap", gap: 10 }, children: items.map((candidate) => (SP_JSX.jsx(FocusableButton, { className: "DialogButton", disabled: busy, onClick: () => void apply(candidate), style: { padding: 0, minWidth: slot.width, height: slot.height }, children: SP_JSX.jsx("img", { src: candidate.thumb || candidate.url, alt: "", style: { width: slot.width, height: slot.height, objectFit: "contain" } }) }, candidate.url))) }) })) }), SP_JSX.jsx(DFL.PanelSection, { children: SP_JSX.jsxs(DFL.PanelSectionRow, { children: [SP_JSX.jsx(FocusableButton, { className: "DialogButton", disabled: busy, onClick: () => void load(), children: t("editor.artwork.reload") }), SP_JSX.jsx(FocusableButton, { className: "DialogButton", disabled: busy, onClick: () => void clear(), children: t("editor.artwork.clear") })] }) })] }) }));
 };
-/** SteamGridDB artwork entry for the library context menu. */
-const artworkMenuItem = (appId) => (SP_JSX.jsx(DFL.MenuItem, { onSelected: () => { void applyForApp(appId); }, children: t("contextMenu.artwork") }, "decky-metadata-artwork"));
 
 const protonDbCoverSurface = (path) => {
     if (/^\/(?:routes\/)?library\/home(?:\/|$)/.test(path ?? ""))
@@ -20319,6 +20403,7 @@ const installProtonDbStoreBadge = () => {
 };
 
 const METADATA_ROUTE = "/decky-metadata/:appid";
+const ARTWORK_ROUTE = "/decky-metadata-artwork/:appid";
 const installInPlaceReloadGuard = (onFailedReload) => {
     const loader = globalThis.DeckyPluginLoader;
     if (!loader || typeof loader.importPlugin !== "function") {
@@ -20401,6 +20486,7 @@ var index = DFL.definePlugin(() => {
     setExtraContextMenuEntry(artworkMenuItem);
     const menuPatch = contextMenuPatch(LibraryContextMenu);
     routerHook.addRoute(METADATA_ROUTE, () => SP_JSX.jsx(MetadataPage, {}), { exact: true });
+    routerHook.addRoute(ARTWORK_ROUTE, () => SP_JSX.jsx(ArtworkPage, {}), { exact: true });
     return {
         // Plugin identity used by Decky Loader (must match plugin.json "name" so
         // find_plugin_folder resolves this install for in-place self-update, and
@@ -20477,6 +20563,7 @@ var index = DFL.definePlugin(() => {
             reloadGuard.unpatch();
             try {
                 routerHook.removeRoute(METADATA_ROUTE);
+                routerHook.removeRoute(ARTWORK_ROUTE);
             }
             catch (error$1) {
                 error("patch", "route remove failed", error$1);

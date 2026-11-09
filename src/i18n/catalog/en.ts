@@ -202,6 +202,10 @@ export const en = {
   "editor.artwork.loading": "Loading artwork...",
   "editor.artwork.empty": "No artwork found",
   "editor.artwork.applied": "Artwork applied",
+  "editor.artwork.cleared": "Artwork cleared",
+  "editor.artwork.pageTitle": "Artwork — {{game}}",
+  "editor.artwork.reload": "Search again",
+  "editor.artwork.clear": "Remove this image",
   "editor.artwork.slot.portrait": "Portrait",
   "editor.artwork.slot.landscape": "Wide capsule",
   "editor.artwork.slot.hero": "Hero",
@@ -303,7 +307,7 @@ export const en = {
   "hltbSearch.noMainStory": "No Main Story time yet",
 
   "contextMenu.edit": "Decky metadata...",
-  "contextMenu.artwork": "Download artwork (SteamGridDB)",
+  "contextMenu.artwork": "Change artwork...",
 
   "conflict.enabled": "{{plugin}} is enabled in Decky Loader. Disable that plugin to use {{feature}} here.",
   "conflict.enabledSaved": " Your setting is saved; this feature will resume when the other plugin is disabled.",
