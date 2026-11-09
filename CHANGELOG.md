@@ -4,6 +4,16 @@ All notable changes to this project are documented here in Keep a Changelog form
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-11-09
+
+Trailers follow the Steam language when the publisher uploaded one.
+
+### Added
+
+- **Localized trailers.** The Steam movie list is requested in the active
+  language and a trailer whose name announces that language is preferred over
+  the highlighted one. Publishers that upload a single trailer see no change.
+
 ## [0.7.2] - 2026-11-09
 
 Documentation and download links now point at this fork.
