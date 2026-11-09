@@ -47,7 +47,21 @@ import { frontendLog } from "./backend";
 // The edit key is inserted for shortcuts. Keep the legacy keys in the removal
 // set because Steam can reuse menu arrays created by older builds.
 const ENTRY_KEY = "decky-metadata-edit";
-const REMOVAL_KEYS = new Set([ENTRY_KEY, "decky-metadata-hltb", "decky-metadata-compatibility"]);
+const ARTWORK_KEY = "decky-metadata-artwork";
+const REMOVAL_KEYS = new Set([
+  ENTRY_KEY,
+  ARTWORK_KEY,
+  "decky-metadata-hltb",
+  "decky-metadata-compatibility",
+]);
+
+/// Extra per-game entries contributed by other plugin areas (e.g. artwork).
+let extraEntryFactory: ((appId: number) => JSX.Element | null) | undefined;
+export const setExtraContextMenuEntry = (
+  factory: ((appId: number) => JSX.Element | null) | undefined,
+) => {
+  extraEntryFactory = factory;
+};
 
 let contextMenuTraceEnabled = false;
 export const setContextMenuTraceEnabled = (enabled: boolean) => {
@@ -183,6 +197,10 @@ const insertOurEntry = (items: any[], appId: number): boolean => {
     </MenuItem>
   );
 
+  const entries: JSX.Element[] = [entry];
+  const extra = extraEntryFactory?.(appId);
+  if (extra) entries.push(extra);
+
   const propertiesIndex = items.findIndex((node) =>
     findInReactTree(
       node,
@@ -190,7 +208,7 @@ const insertOurEntry = (items: any[], appId: number): boolean => {
     )
   );
   const insertAt = propertiesIndex >= 0 ? propertiesIndex : items.length;
-  items.splice(insertAt, 0, entry);
+  items.splice(insertAt, 0, ...entries);
   return true;
 };
 

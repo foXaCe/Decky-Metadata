@@ -5,7 +5,11 @@ import { syncContentLocale } from "./contentLocale";
 import { Content } from "./ContentPanel";
 import { MetadataPage } from "./MetadataPage";
 import { clearCompatibilityDropdownReturn } from "./qamCompatibilityFocus";
-import contextMenuPatch, { LibraryContextMenu } from "./contextMenuPatch";
+import contextMenuPatch, {
+  LibraryContextMenu,
+  setExtraContextMenuEntry,
+} from "./contextMenuPatch";
+import { artworkMenuItem } from "./artworkMenu";
 import { refreshLocale } from "./i18n";
 import { frontendLog, getDebugLogging } from "./backend";
 import * as log from "./log";
@@ -107,6 +111,7 @@ export default definePlugin(() => {
   const stopProtonDbCovers = installProtonDbCoverBadges();
   const stopProtonDbGameView = installProtonDbGameView();
   const stopProtonDbStoreBadge = installProtonDbStoreBadge();
+  setExtraContextMenuEntry(artworkMenuItem);
   const menuPatch = contextMenuPatch(LibraryContextMenu);
 
   routerHook.addRoute(METADATA_ROUTE, () => <MetadataPage />, { exact: true });
@@ -141,6 +146,7 @@ export default definePlugin(() => {
       } catch (error) {
         log.error("patch", "compatibility reload state retain failed", error);
       }
+      setExtraContextMenuEntry(undefined);
       try {
         menuPatch?.unpatch?.();
       } catch (error) {

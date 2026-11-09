@@ -303,6 +303,7 @@ export const en = {
   "hltbSearch.noMainStory": "No Main Story time yet",
 
   "contextMenu.edit": "Decky metadata...",
+  "contextMenu.artwork": "Download artwork (SteamGridDB)",
 
   "conflict.enabled": "{{plugin}} is enabled in Decky Loader. Disable that plugin to use {{feature}} here.",
   "conflict.enabledSaved": " Your setting is saved; this feature will resume when the other plugin is disabled.",

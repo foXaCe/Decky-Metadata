@@ -307,6 +307,7 @@ export const fr: Record<keyof typeof en, string> = {
   "hltbSearch.noMainStory": "Pas encore de temps pour l'histoire principale",
 
   "contextMenu.edit": "Métadonnées Decky…",
+  "contextMenu.artwork": "Télécharger les illustrations (SteamGridDB)",
 
   "conflict.enabled": "{{plugin}} est activé dans Decky Loader. Désactivez ce plugin pour utiliser {{feature}} ici.",
   "conflict.enabledSaved": " Votre réglage est enregistré ; cette fonction reprendra lorsque l'autre plugin sera désactivé.",

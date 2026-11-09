@@ -643,6 +643,7 @@ const en = {
     "hltbSearch.mainStory": "Main Story {{hours}} hours",
     "hltbSearch.noMainStory": "No Main Story time yet",
     "contextMenu.edit": "Decky metadata...",
+    "contextMenu.artwork": "Download artwork (SteamGridDB)",
     "conflict.enabled": "{{plugin}} is enabled in Decky Loader. Disable that plugin to use {{feature}} here.",
     "conflict.enabledSaved": " Your setting is saved; this feature will resume when the other plugin is disabled.",
     "conflict.detectionUnavailable": "Could not check for conflicting plugins. Use only one {{feature}} provider at a time.",
@@ -996,6 +997,7 @@ const fr = {
     "hltbSearch.mainStory": "Histoire principale : {{hours}} heures",
     "hltbSearch.noMainStory": "Pas encore de temps pour l'histoire principale",
     "contextMenu.edit": "Métadonnées Decky…",
+    "contextMenu.artwork": "Télécharger les illustrations (SteamGridDB)",
     "conflict.enabled": "{{plugin}} est activé dans Decky Loader. Désactivez ce plugin pour utiliser {{feature}} ici.",
     "conflict.enabledSaved": " Votre réglage est enregistré ; cette fonction reprendra lorsque l'autre plugin sera désactivé.",
     "conflict.detectionUnavailable": "Impossible de vérifier les plugins en conflit. N'utilisez qu'un seul fournisseur de {{feature}} à la fois.",
@@ -9543,7 +9545,18 @@ const installHistoryInstanceTrace = (unpatchers) => {
 // The edit key is inserted for shortcuts. Keep the legacy keys in the removal
 // set because Steam can reuse menu arrays created by older builds.
 const ENTRY_KEY = "decky-metadata-edit";
-const REMOVAL_KEYS = new Set([ENTRY_KEY, "decky-metadata-hltb", "decky-metadata-compatibility"]);
+const ARTWORK_KEY = "decky-metadata-artwork";
+const REMOVAL_KEYS = new Set([
+    ENTRY_KEY,
+    ARTWORK_KEY,
+    "decky-metadata-hltb",
+    "decky-metadata-compatibility",
+]);
+/// Extra per-game entries contributed by other plugin areas (e.g. artwork).
+let extraEntryFactory;
+const setExtraContextMenuEntry = (factory) => {
+    extraEntryFactory = factory;
+};
 let contextMenuTraceEnabled = false;
 const setContextMenuTraceEnabled = (enabled) => {
     contextMenuTraceEnabled = enabled;
@@ -9637,9 +9650,13 @@ const insertOurEntry = (items, appId) => {
     if (!isNativeNonSteamShortcut(getNativeOverview(appId)))
         return false;
     const entry = (SP_JSX.jsx(DFL.MenuItem, { onSelected: () => DFL.Navigation.Navigate(`/decky-metadata/${appId}`), children: t("contextMenu.edit") }, ENTRY_KEY));
+    const entries = [entry];
+    const extra = extraEntryFactory?.(appId);
+    if (extra)
+        entries.push(extra);
     const propertiesIndex = items.findIndex((node) => DFL.findInReactTree(node, (x) => x?.onSelected?.toString?.().includes("AppProperties")));
     const insertAt = propertiesIndex >= 0 ? propertiesIndex : items.length;
-    items.splice(insertAt, 0, entry);
+    items.splice(insertAt, 0, ...entries);
     return true;
 };
 const syncOurEntry = (phase, items, ownerAppId, fallbackAppId) => {
@@ -19160,6 +19177,18 @@ const MetadataPage = () => {
                                             }, style: fieldStyle }), SP_JSX.jsx(FocusableButton, { className: `DialogButton ${editorFocusTargetClassName}`, disabled: entryBusy, onClick: () => applySteamAppId(), style: editorAppIdButtonStyle, children: t("editor.steamAppId.apply") })] })] }) }) }), SP_JSX.jsx(DFL.PanelSection, { title: t("editor.shortcutName.title"), children: SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs("div", { style: rowStackStyle, children: [SP_JSX.jsx(DFL.Field, { className: `${editorFocusTargetClassName} decky-metadata-editor__shortcut-name`, focusable: true, highlightOnFocus: false, childrenLayout: "below", padding: "none", bottomSeparator: "none", children: SP_JSX.jsxs("div", { style: rowStackStyle, children: [SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.current", { name: currentShortcutName ?? t("editor.shortcutName.noNative") }) }), steamStoreName ? SP_JSX.jsx("div", { style: compactTextStyle, children: `Steam: ${steamStoreName}` }) : null, steamNameLoading ? SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.loading") }) : null, steamNameUnavailable ? SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.noOfficial") }) : null, shortcutManagementError ? SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.unavailable") }) : null, !shortcutManagementError && shortcutManagement?.eligible && !hasShortcutNameApi() ? SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.apiUnavailable") }) : null, !shortcutManagementError && shortcutManagement?.reason === "shortcut_not_found" ? SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.notFound") }) : null, !shortcutManagementError && shortcutManagement?.reason === "derived_shortcut_id" ? SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.derivedId") }) : null, !shortcutManagementError && shortcutManagement?.eligible && currentShortcutName === steamStoreName && steamStoreName ? SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.matches") }) : null, shortcutStatus === "diverged" ? SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.diverged") }) : null, !steamNameLoading && !steamStoreName && hasSteamMatch && !steamNameUnavailable ? SP_JSX.jsx("div", { style: compactTextStyle, children: t("editor.shortcutName.noOfficial") }) : null] }) }), canUseSteamName ? (SP_JSX.jsx(FocusableButton, { className: `DialogButton ${editorFocusTargetClassName}`, disabled: entryBusy, onClick: showUseSteamNameModal, style: editorAppIdButtonStyle, children: t("editor.shortcutName.useSteam") })) : null, shortcutManagement?.eligible && shortcutStatus === "managed" && shortcutManagement.state ? (SP_JSX.jsx(FocusableButton, { className: `DialogButton ${editorFocusTargetClassName}`, disabled: entryBusy || !hasShortcutNameApi(), onClick: showRestoreShortcutNameModal, style: editorAppIdButtonStyle, children: t("editor.shortcutName.restore") })) : null, shortcutManagement?.eligible && shortcutStatus === "diverged" ? (SP_JSX.jsx(FocusableButton, { className: `DialogButton ${editorFocusTargetClassName}`, disabled: entryBusy, onClick: showForgetShortcutNameHistoryModal, style: editorAppIdButtonStyle, children: t("editor.shortcutName.forget") })) : null] }) }) })] }) }));
 };
 
+const applyForApp = async (appId) => {
+    try {
+        const count = await fetchAndApplyArtwork(appId, appName(appId), Number(metadataCache[String(appId)]?.steam_appid) || null);
+        toastSuccess(t("qam.artwork.title"), t("toast.artwork.applied", { count }));
+    }
+    catch (error) {
+        toastError(t("qam.artwork.title"), String(error));
+    }
+};
+/** SteamGridDB artwork entry for the library context menu. */
+const artworkMenuItem = (appId) => (SP_JSX.jsx(DFL.MenuItem, { onSelected: () => { void applyForApp(appId); }, children: t("contextMenu.artwork") }, "decky-metadata-artwork"));
+
 const protonDbCoverSurface = (path) => {
     if (/^\/(?:routes\/)?library\/home(?:\/|$)/.test(path ?? ""))
         return "home";
@@ -20361,6 +20390,7 @@ var index = DFL.definePlugin(() => {
     const stopProtonDbCovers = installProtonDbCoverBadges();
     const stopProtonDbGameView = installProtonDbGameView();
     const stopProtonDbStoreBadge = installProtonDbStoreBadge();
+    setExtraContextMenuEntry(artworkMenuItem);
     const menuPatch = contextMenuPatch(LibraryContextMenu);
     routerHook.addRoute(METADATA_ROUTE, () => SP_JSX.jsx(MetadataPage, {}), { exact: true });
     return {
@@ -20394,6 +20424,7 @@ var index = DFL.definePlugin(() => {
             catch (error$1) {
                 error("patch", "compatibility reload state retain failed", error$1);
             }
+            setExtraContextMenuEntry(undefined);
             try {
                 menuPatch?.unpatch?.();
             }
