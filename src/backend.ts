@@ -145,6 +145,18 @@ export const setContentLocale = callable<
   [language: string],
   { ok: boolean; content_locale: string }
 >("set_content_locale");
+/** SteamGridDB artwork: the key never comes back from the backend. */
+export const getArtworkSettings = callable<[], { configured: boolean }>(
+  "get_artwork_settings"
+);
+export const setArtworkSettings = callable<
+  [apiKey: string],
+  { configured: boolean }
+>("set_artwork_settings");
+export const fetchArtwork = callable<
+  [appId: number, title: string, steamAppId: number | null],
+  Partial<Record<"portrait" | "landscape" | "hero" | "logo", string>>
+>("fetch_artwork");
 export const getDebugLogging = callable<[], boolean>("get_debug_logging");
 export const setDebugLogging = callable<[enabled: boolean], boolean>(
   "set_debug_logging"

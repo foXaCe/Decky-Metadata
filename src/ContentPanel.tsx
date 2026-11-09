@@ -25,6 +25,7 @@ import {
   setUpdateChannel,
   startScanMissing,
 } from "./backend";
+import { ArtworkSection } from "./components/qam/ArtworkSection";
 import { CompatibilitySection } from "./components/qam/CompatibilitySection";
 import { GameTrailersSection } from "./components/qam/GameTrailersSection";
 import { LogsSection } from "./components/qam/LogsSection";
@@ -1070,6 +1071,7 @@ export const Content = () => {
         }
         onInstallVersionConfirmed={setPluginVersion}
       />
+      <ArtworkSection />
       <VersionsSection
         pluginVersion={pluginVersion}
         deckyVersion={deckyVersion}

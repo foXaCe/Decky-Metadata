@@ -403,6 +403,7 @@ pub fn default_settings() -> Value {
         "mini_achievements_enabled": false,
         "protondb_badges": default_protondb_badge_settings(),
         "content_locale": crate::locale::DEFAULT_LANGUAGE,
+        "artwork": default_artwork_settings(),
     })
 }
 
@@ -423,6 +424,34 @@ pub fn validate_content_locale(value: &Value) -> Result<String, String> {
         .and_then(crate::locale::normalize)
         .map(str::to_owned)
         .ok_or_else(|| "unsupported content language".to_owned())
+}
+
+pub fn default_artwork_settings() -> Value {
+    json!({"api_key": ""})
+}
+
+pub fn normalize_artwork_settings(value: &Value) -> Value {
+    let api_key = value["api_key"].as_str().unwrap_or("").trim().to_owned();
+    json!({"api_key": api_key})
+}
+
+pub fn artwork_api_key(data: &Value) -> String {
+    data["settings"]["artwork"]["api_key"]
+        .as_str()
+        .unwrap_or("")
+        .trim()
+        .to_owned()
+}
+
+pub fn validate_artwork_api_key(value: &Value) -> Result<String, String> {
+    let key = value
+        .as_str()
+        .map(str::trim)
+        .unwrap_or("");
+    if key.chars().count() > 128 || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err("invalid SteamGridDB API key".to_owned());
+    }
+    Ok(key.to_owned())
 }
 
 pub fn default_trailer_settings() -> Value {
@@ -468,6 +497,7 @@ fn normalize_settings_owned(saved: Option<Value>) -> Value {
     let protondb = saved.remove("protondb_badges");
     let hltb = saved.remove("hltb");
     let content_locale = saved.remove("content_locale");
+    let artwork = saved.remove("artwork");
     let has_scope = saved.contains_key("deck_compat_default_scope");
     let scope = saved.remove("deck_compat_default_scope");
     let legacy_scope = saved.remove("deck_compat_default_matched_only");
@@ -514,6 +544,10 @@ fn normalize_settings_owned(saved: Option<Value>) -> Value {
     normalized.insert(
         "content_locale".to_owned(),
         Value::String(content_locale_value(content_locale.as_ref())),
+    );
+    normalized.insert(
+        "artwork".to_owned(),
+        normalize_artwork_settings(artwork.as_ref().unwrap_or(&Value::Null)),
     );
 
     if has_scope || has_legacy_scope {

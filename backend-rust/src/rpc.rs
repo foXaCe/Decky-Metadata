@@ -32,6 +32,9 @@ pub const METHODS: &[&str] = &[
     "get_provider_cache",
     "get_content_locale",
     "set_content_locale",
+    "get_artwork_settings",
+    "set_artwork_settings",
+    "fetch_artwork",
     "put_protondb_cache",
     "get_hltb_settings",
     "set_hltb_settings",
@@ -253,6 +256,35 @@ pub async fn dispatch(state: Arc<AppState>, method: &str, args: Vec<Value>) -> M
                 log::Level::Info,
             );
             Ok(json!({"ok": true, "content_locale": language}))
+        }
+        "get_artwork_settings" => {
+            arity(&args, 0, 0)?;
+            let key = storage::artwork_api_key(state.store().await?.data());
+            Ok(json!({"configured": !key.is_empty()}))
+        }
+        "set_artwork_settings" => {
+            arity(&args, 1, 1)?;
+            let key = storage::validate_artwork_api_key(&args[0])?;
+            state.set_setting("artwork", json!({"api_key": key})).await?;
+            Ok(json!({"configured": !key.is_empty()}))
+        }
+        "fetch_artwork" => {
+            arity(&args, 2, 3)?;
+            let key = storage::artwork_api_key(state.store().await?.data());
+            if key.is_empty() {
+                return Err("SteamGridDB API key is not set".to_owned());
+            }
+            let steam_appid = args.get(2).and_then(|value| value.as_i64());
+            let artwork = crate::providers::steamgriddb::fetch(
+                &state.http,
+                &key,
+                &metadata::text(&args[1]),
+                steam_appid,
+            )
+            .await;
+            Ok(artwork
+                .map(crate::providers::steamgriddb::payload)
+                .unwrap_or_else(|| json!({})))
         }
         "get_debug_logging" => {
             arity(&args, 0, 0)?;

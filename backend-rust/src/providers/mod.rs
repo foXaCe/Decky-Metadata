@@ -4,5 +4,6 @@ pub mod community;
 pub mod delisted;
 pub mod ign;
 pub mod steam;
+pub mod steamgriddb;
 pub mod translate;
 pub mod wikipedia;

@@ -57,6 +57,7 @@ import {
   ShortcutNameManagement,
 } from "./types";
 import { syncContentLocale } from "./contentLocale";
+import { fetchAndApplyArtwork } from "./artwork";
 import { toastError, toastSuccess, toastWarn } from "./toast";
 import { SteamMatchPicker } from "./SteamMatchPicker";
 import { t, useLocale } from "./i18n";
@@ -1039,6 +1040,20 @@ export const MetadataPage = () => {
   };
 
 
+  const fetchArtworkForGame = async () => {
+    if (entryBusy) return;
+    try {
+      const applied = await fetchAndApplyArtwork(
+        appId,
+        appName(appId),
+        normalizedSteamAppId(metadata.steam_appid),
+      );
+      toastSuccess(t("qam.artwork.title"), t("toast.artwork.applied", { count: applied }));
+    } catch (error) {
+      toastError(t("qam.artwork.title"), String(error));
+    }
+  };
+
   const toggleCategory = (category: number, checked: boolean) => {
     updateMetadata((prev) => {
       const next = new Set(prev.store_categories || []);
@@ -1081,6 +1096,13 @@ export const MetadataPage = () => {
             style={editorRemoveButtonStyle}
           >
             {t("editor.remove")}
+          </FocusableButton>
+          <FocusableButton
+            className={`DialogButton ${editorFocusTargetClassName} decky-metadata-editor__action--artwork`}
+            onClick={() => void fetchArtworkForGame()}
+            style={editorActionButtonStyle}
+          >
+            {t("editor.artwork.fetch")}
           </FocusableButton>
           <FocusableButton
             className={`DialogButton ${editorFocusTargetClassName}`}
