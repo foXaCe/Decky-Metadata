@@ -122,6 +122,9 @@ const setContentLocale = callable("set_content_locale");
 const getArtworkSettings = callable("get_artwork_settings");
 const setArtworkSettings = callable("set_artwork_settings");
 const fetchArtwork = callable("fetch_artwork");
+const listArtwork = callable("list_artwork");
+const downloadArtwork = callable("download_artwork");
+const getArtworkStatus = callable("artwork_status");
 const getDebugLogging = callable("get_debug_logging");
 const setDebugLogging = callable("set_debug_logging");
 const getCompatibilityDefault = callable("get_compatibility_default");
@@ -165,6 +168,7 @@ var backend = /*#__PURE__*/Object.freeze({
     clearPendingUpdateInstall: clearPendingUpdateInstall,
     clearShortcutNameState: clearShortcutNameState,
     confirmUpdateInstallHandoff: confirmUpdateInstallHandoff,
+    downloadArtwork: downloadArtwork,
     enrichSteamApp: enrichSteamApp,
     evalInBigPicture: evalInBigPicture,
     fetchArtwork: fetchArtwork,
@@ -174,6 +178,7 @@ var backend = /*#__PURE__*/Object.freeze({
     getActivityRefreshProgress: getActivityRefreshProgress,
     getAllMetadata: getAllMetadata,
     getArtworkSettings: getArtworkSettings,
+    getArtworkStatus: getArtworkStatus,
     getCommunityFallbackPage: getCommunityFallbackPage,
     getCompatibilityDefault: getCompatibilityDefault,
     getCompatibilityDefaultScope: getCompatibilityDefaultScope,
@@ -197,6 +202,7 @@ var backend = /*#__PURE__*/Object.freeze({
     getTrailerSettings: getTrailerSettings,
     getUpdateCheckContext: getUpdateCheckContext,
     getUpdateSettings: getUpdateSettings,
+    listArtwork: listArtwork,
     putProtonDbCache: putProtonDbCache,
     recordUpdateInstallRequested: recordUpdateInstallRequested,
     refreshDelistedIndex: refreshDelistedIndex,
@@ -535,6 +541,17 @@ const en = {
     "qam.artwork.save": "Save key",
     "qam.artwork.help": "The key stays on this Deck and is only used to query SteamGridDB.",
     "editor.artwork.fetch": "Fetch artwork",
+    "editor.artwork.title": "Artwork",
+    "editor.artwork.load": "Load artwork proposals",
+    "editor.artwork.loading": "Loading artwork...",
+    "editor.artwork.empty": "No artwork found",
+    "editor.artwork.applied": "Artwork applied",
+    "editor.artwork.slot.portrait": "Portrait",
+    "editor.artwork.slot.landscape": "Wide capsule",
+    "editor.artwork.slot.hero": "Hero",
+    "editor.artwork.slot.logo": "Logo",
+    "qam.artwork.applyMissing": "Fetch artwork for games missing it",
+    "qam.artwork.batchProgress": "{{done}}/{{total}}",
     "toast.artwork.applied": "{{count}} images applied",
     "qam.versions.title": "Versions",
     "qam.versions.plugin": "Decky Metadata: {{version}}",
@@ -877,6 +894,17 @@ const fr = {
     "qam.artwork.save": "Enregistrer la clé",
     "qam.artwork.help": "La clé reste sur ce Deck et ne sert qu'à interroger SteamGridDB.",
     "editor.artwork.fetch": "Télécharger les illustrations",
+    "editor.artwork.title": "Illustrations",
+    "editor.artwork.load": "Charger les propositions",
+    "editor.artwork.loading": "Chargement des illustrations…",
+    "editor.artwork.empty": "Aucune illustration trouvée",
+    "editor.artwork.applied": "Illustration appliquée",
+    "editor.artwork.slot.portrait": "Portrait",
+    "editor.artwork.slot.landscape": "Vignette paysage",
+    "editor.artwork.slot.hero": "Bannière",
+    "editor.artwork.slot.logo": "Logo",
+    "qam.artwork.applyMissing": "Télécharger les illustrations manquantes",
+    "qam.artwork.batchProgress": "{{done}}/{{total}}",
     "toast.artwork.applied": "{{count}} images appliquées",
     "qam.versions.title": "Versions",
     "qam.versions.plugin": "Decky Metadata : {{version}}",
@@ -1183,6 +1211,92 @@ const useLocale = () => {
     return locale;
 };
 
+/**
+ * SteamGridDB artwork for non-Steam shortcuts.
+ *
+ * The backend resolves the game with the user's SteamGridDB key and returns the
+ * images as base64; Steam's own `SetCustomArtworkForApp` writes the files and
+ * invalidates the library cache, so the plugin never touches `config/grid`.
+ */
+/** Steam artwork slots: 0 portrait grid, 1 hero, 2 logo, 3 landscape grid. */
+const SLOTS = [
+    ["portrait", 0],
+    ["hero", 1],
+    ["logo", 2],
+    ["landscape", 3],
+];
+const steamApps = () => globalThis?.SteamClient?.Apps;
+/** Hand the downloaded images to Steam for one shortcut. */
+const applyArtwork = async (appId, payload) => {
+    const api = steamApps();
+    if (!api?.SetCustomArtworkForApp) {
+        throw new Error("Steam artwork API is unavailable");
+    }
+    let applied = 0;
+    for (const [key, type] of SLOTS) {
+        const data = payload[key];
+        if (!data)
+            continue;
+        await api.SetCustomArtworkForApp(appId, data, "png", type);
+        applied += 1;
+    }
+    if (applied > 0 && payload.logo) {
+        // Shortcuts render a blank logo until a position entry exists.
+        try {
+            const overview = globalThis?.appStore?.GetAppOverviewByAppID?.(appId);
+            await globalThis?.appDetailsStore?.SaveCustomLogoPosition?.(overview, {
+                pinnedPosition: "BottomLeft",
+                nWidthPct: 50,
+                nHeightPct: 50,
+            });
+        }
+        catch (error) {
+            warn("artwork", "logo position save failed", error);
+        }
+    }
+    return applied;
+};
+/** Shortcuts with at least one missing artwork slot. */
+const gamesMissingArtwork = async (appIds) => {
+    if (appIds.length === 0)
+        return [];
+    const status = await getArtworkStatus(appIds);
+    return appIds.filter((appId) => {
+        const entry = status[String(appId)];
+        return !entry || !entry.portrait || !entry.landscape || !entry.hero || !entry.logo;
+    });
+};
+/**
+ * Apply the best artwork to every shortcut that misses at least one slot.
+ * Returns how many games received images.
+ */
+const applyArtworkToMissing = async (games, onProgress) => {
+    const missing = await gamesMissingArtwork(games.map((game) => game.appId));
+    let applied = 0;
+    for (const [index, appId] of missing.entries()) {
+        const game = games.find((candidate) => candidate.appId === appId);
+        if (!game)
+            continue;
+        onProgress?.(index + 1, missing.length);
+        try {
+            applied += await fetchAndApplyArtwork(appId, game.title, game.steamAppId);
+        }
+        catch (error) {
+            warn("artwork", `artwork failed for ${appId}`, error);
+        }
+    }
+    return applied;
+};
+/** Download SteamGridDB artwork for one shortcut and apply it. */
+const fetchAndApplyArtwork = async (appId, title, steamAppId) => {
+    const payload = await fetchArtwork(appId, title, steamAppId ?? null);
+    const applied = await applyArtwork(appId, payload);
+    if (applied === 0) {
+        throw new Error("No artwork found");
+    }
+    return applied;
+};
+
 // Shared semantic style tokens, aligned with beallio/SDH-Ludusavi.
 const colors = {
     accent: "#1a9fff",
@@ -1330,8 +1444,10 @@ function CollapsibleSection({ title, icon, children, defaultExpanded = false }) 
                 }, onBlur: () => setFocused(false), style: focused ? focusedHeadingStyle : headingStyle, children: [SP_JSX.jsxs("span", { style: headingLabelStyle, children: [SP_JSX.jsx("span", { "aria-hidden": "true", style: headingIconStyle, children: icon }), SP_JSX.jsx("span", { children: title })] }), expanded ? SP_JSX.jsx(FaChevronUp, { size: 12 }) : SP_JSX.jsx(FaChevronDown, { size: 12 })] }), SP_JSX.jsx("div", { id: id, role: "region", "aria-labelledby": `${id}-heading`, children: expanded ? SP_JSX.jsx(DFL.PanelSection, { children: children }) : null })] }));
 }
 
-function ArtworkSection() {
+function ArtworkSection({ games }) {
     const [configured, setConfigured] = SP_REACT.useState(false);
+    const [batch, setBatch] = SP_REACT.useState(null);
+    const [applied, setApplied] = SP_REACT.useState(null);
     const [draft, setDraft] = SP_REACT.useState("");
     const [busy, setBusy] = SP_REACT.useState(false);
     const [error, setError] = SP_REACT.useState("");
@@ -1347,6 +1463,22 @@ function ArtworkSection() {
             cancelled = true;
         };
     }, []);
+    const runBatch = async () => {
+        if (batch || !configured)
+            return;
+        setApplied(null);
+        setBatch({ done: 0, total: games.length });
+        try {
+            const count = await applyArtworkToMissing(games.map((game) => ({ appId: game.appid, title: game.name })), (done, total) => setBatch({ done, total }));
+            setApplied(count);
+        }
+        catch (cause) {
+            setError(String(cause));
+        }
+        finally {
+            setBatch(null);
+        }
+    };
     const save = async () => {
         if (busy)
             return;
@@ -1364,7 +1496,9 @@ function ArtworkSection() {
             setBusy(false);
         }
     };
-    return (SP_JSX.jsxs(CollapsibleSection, { title: t("qam.artwork.title"), icon: SP_JSX.jsx(FaImages, { size: 16 }), children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: compactTextStyle, children: configured ? t("qam.artwork.configured") : t("qam.artwork.hint") }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.TextField, { label: t("qam.artwork.keyLabel"), value: draft, onChange: (event) => setDraft(event.target.value) }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", bottomSeparator: "none", disabled: busy || draft.trim().length === 0, onClick: () => void save(), children: busy ? t("common.loading") : t("qam.artwork.save") }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs(DFL.Field, { focusable: false, childrenLayout: "below", padding: "none", bottomSeparator: "none", children: [SP_JSX.jsx("div", { style: compactTextStyle, children: t("qam.artwork.help") }), error ? SP_JSX.jsx("div", { style: inlineStatusStyle("error"), children: error }) : null] }) })] }));
+    return (SP_JSX.jsxs(CollapsibleSection, { title: t("qam.artwork.title"), icon: SP_JSX.jsx(FaImages, { size: 16 }), children: [SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: compactTextStyle, children: configured ? t("qam.artwork.configured") : t("qam.artwork.hint") }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.TextField, { label: t("qam.artwork.keyLabel"), value: draft, onChange: (event) => setDraft(event.target.value) }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", bottomSeparator: "none", disabled: busy || draft.trim().length === 0, onClick: () => void save(), children: busy ? t("common.loading") : t("qam.artwork.save") }) }), SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx(DFL.ButtonItem, { layout: "below", bottomSeparator: "none", disabled: busy || !configured || batch !== null || games.length === 0, onClick: () => void runBatch(), children: batch
+                        ? t("qam.artwork.batchProgress", { done: batch.done, total: batch.total })
+                        : t("qam.artwork.applyMissing") }) }), applied !== null ? (SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsx("div", { style: inlineStatusStyle("success"), children: t("toast.artwork.applied", { count: applied }) }) })) : null, SP_JSX.jsx(DFL.PanelSectionRow, { children: SP_JSX.jsxs(DFL.Field, { focusable: false, childrenLayout: "below", padding: "none", bottomSeparator: "none", children: [SP_JSX.jsx("div", { style: compactTextStyle, children: t("qam.artwork.help") }), error ? SP_JSX.jsx("div", { style: inlineStatusStyle("error"), children: error }) : null] }) })] }));
 }
 
 // THIS FILE IS AUTO GENERATED
@@ -17549,7 +17683,7 @@ const Content = () => {
                 }, onQualityMenuWillOpen: () => {
                     requestCompatibilityDropdownReturn("quality");
                     noteCompatibilityDropdownControlUnmounted();
-                }, onQualityControlRef: setTrailerQualityControl }), SP_JSX.jsx(MiniAchievementsSection, { state: miniAchievementsSnapshot, onEnabledChange: (enabled) => void miniAchievementsController.setEnabled(enabled) }), SP_JSX.jsx(LogsSection, { logsBusy: logsBusy, debugLogging: debugLogging, debugLoggingBusy: debugLoggingBusy, onViewLogs: () => void viewLogs(), onToggleDebugLogging: (enabled) => void saveDebugLogging(enabled) }), SP_JSX.jsx(PluginUpdateSection, { currentVersion: pluginVersion, updateChannel: updateChannel, automaticUpdateChecks: automaticUpdateChecks, settingsLoaded: settingsLoaded, onToggleUpdateChannel: (enabled) => void saveUpdateChannel(enabled), onToggleAutomaticUpdateChecks: (enabled) => void saveAutomaticUpdateChecks(enabled), onInstallVersionConfirmed: setPluginVersion }), SP_JSX.jsx(ArtworkSection, {}), SP_JSX.jsx(VersionsSection, { pluginVersion: pluginVersion, deckyVersion: deckyVersion, steamosVersion: steamosVersion, controllerTypes: controllerTypes })] }));
+                }, onQualityControlRef: setTrailerQualityControl }), SP_JSX.jsx(MiniAchievementsSection, { state: miniAchievementsSnapshot, onEnabledChange: (enabled) => void miniAchievementsController.setEnabled(enabled) }), SP_JSX.jsx(LogsSection, { logsBusy: logsBusy, debugLogging: debugLogging, debugLoggingBusy: debugLoggingBusy, onViewLogs: () => void viewLogs(), onToggleDebugLogging: (enabled) => void saveDebugLogging(enabled) }), SP_JSX.jsx(PluginUpdateSection, { currentVersion: pluginVersion, updateChannel: updateChannel, automaticUpdateChecks: automaticUpdateChecks, settingsLoaded: settingsLoaded, onToggleUpdateChannel: (enabled) => void saveUpdateChannel(enabled), onToggleAutomaticUpdateChecks: (enabled) => void saveAutomaticUpdateChecks(enabled), onInstallVersionConfirmed: setPluginVersion }), SP_JSX.jsx(ArtworkSection, { games: games }), SP_JSX.jsx(VersionsSection, { pluginVersion: pluginVersion, deckyVersion: deckyVersion, steamosVersion: steamosVersion, controllerTypes: controllerTypes })] }));
 };
 
 /*
@@ -17624,61 +17758,6 @@ const CATEGORY_LABELS = {
     [StoreCategory.FullController]: "Full controller support",
     [StoreCategory.MMO]: "MMO",
     [StoreCategory.Achievements]: "Achievements",
-};
-
-/**
- * SteamGridDB artwork for non-Steam shortcuts.
- *
- * The backend resolves the game with the user's SteamGridDB key and returns the
- * images as base64; Steam's own `SetCustomArtworkForApp` writes the files and
- * invalidates the library cache, so the plugin never touches `config/grid`.
- */
-/** Steam artwork slots: 0 portrait grid, 1 hero, 2 logo, 3 landscape grid. */
-const SLOTS = [
-    ["portrait", 0],
-    ["hero", 1],
-    ["logo", 2],
-    ["landscape", 3],
-];
-const steamApps = () => globalThis?.SteamClient?.Apps;
-/** Hand the downloaded images to Steam for one shortcut. */
-const applyArtwork = async (appId, payload) => {
-    const api = steamApps();
-    if (!api?.SetCustomArtworkForApp) {
-        throw new Error("Steam artwork API is unavailable");
-    }
-    let applied = 0;
-    for (const [key, type] of SLOTS) {
-        const data = payload[key];
-        if (!data)
-            continue;
-        await api.SetCustomArtworkForApp(appId, data, "png", type);
-        applied += 1;
-    }
-    if (applied > 0 && payload.logo) {
-        // Shortcuts render a blank logo until a position entry exists.
-        try {
-            const overview = globalThis?.appStore?.GetAppOverviewByAppID?.(appId);
-            await globalThis?.appDetailsStore?.SaveCustomLogoPosition?.(overview, {
-                pinnedPosition: "BottomLeft",
-                nWidthPct: 50,
-                nHeightPct: 50,
-            });
-        }
-        catch (error) {
-            warn("artwork", "logo position save failed", error);
-        }
-    }
-    return applied;
-};
-/** Download SteamGridDB artwork for one shortcut and apply it. */
-const fetchAndApplyArtwork = async (appId, title, steamAppId) => {
-    const payload = await fetchArtwork(appId, title, steamAppId ?? null);
-    const applied = await applyArtwork(appId, payload);
-    if (applied === 0) {
-        throw new Error("No artwork found");
-    }
-    return applied;
 };
 
 const editorRootClassName = "decky-metadata-editor";

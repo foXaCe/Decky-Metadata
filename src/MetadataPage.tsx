@@ -59,6 +59,7 @@ import {
 import { syncContentLocale } from "./contentLocale";
 import { fetchAndApplyArtwork } from "./artwork";
 import { toastError, toastSuccess, toastWarn } from "./toast";
+import { ArtworkPicker } from "./components/ArtworkPicker";
 import { SteamMatchPicker } from "./SteamMatchPicker";
 import { t, useLocale } from "./i18n";
 import type { MessageKey } from "./i18n";

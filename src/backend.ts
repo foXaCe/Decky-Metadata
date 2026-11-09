@@ -157,6 +157,28 @@ export const fetchArtwork = callable<
   [appId: number, title: string, steamAppId: number | null],
   Partial<Record<"portrait" | "landscape" | "hero" | "logo", string>>
 >("fetch_artwork");
+export type ArtworkCandidate = {
+  id?: number;
+  url: string;
+  thumb: string;
+  width?: number;
+  height?: number;
+  style?: string;
+};
+export type ArtworkCandidates = Record<"portrait" | "landscape" | "hero" | "logo", ArtworkCandidate[]>;
+export type ArtworkStatus = Record<"portrait" | "landscape" | "hero" | "logo", boolean>;
+
+export const listArtwork = callable<
+  [appId: number, title: string, steamAppId: number | null],
+  Partial<ArtworkCandidates>
+>("list_artwork");
+export const downloadArtwork = callable<[url: string], string | null>(
+  "download_artwork"
+);
+export const getArtworkStatus = callable<
+  [appIds: number[]],
+  Record<string, ArtworkStatus>
+>("artwork_status");
 export const getDebugLogging = callable<[], boolean>("get_debug_logging");
 export const setDebugLogging = callable<[enabled: boolean], boolean>(
   "set_debug_logging"

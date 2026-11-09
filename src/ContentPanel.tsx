@@ -1071,7 +1071,7 @@ export const Content = () => {
         }
         onInstallVersionConfirmed={setPluginVersion}
       />
-      <ArtworkSection />
+      <ArtworkSection games={games} />
       <VersionsSection
         pluginVersion={pluginVersion}
         deckyVersion={deckyVersion}

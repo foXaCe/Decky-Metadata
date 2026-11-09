@@ -35,6 +35,9 @@ pub const METHODS: &[&str] = &[
     "get_artwork_settings",
     "set_artwork_settings",
     "fetch_artwork",
+    "list_artwork",
+    "download_artwork",
+    "artwork_status",
     "put_protondb_cache",
     "get_hltb_settings",
     "set_hltb_settings",
@@ -285,6 +288,44 @@ pub async fn dispatch(state: Arc<AppState>, method: &str, args: Vec<Value>) -> M
             Ok(artwork
                 .map(crate::providers::steamgriddb::payload)
                 .unwrap_or_else(|| json!({})))
+        }
+        "list_artwork" => {
+            arity(&args, 2, 3)?;
+            let key = storage::artwork_api_key(state.store().await?.data());
+            if key.is_empty() {
+                return Err("SteamGridDB API key is not set".to_owned());
+            }
+            let steam_appid = args.get(2).and_then(|value| value.as_i64());
+            Ok(crate::providers::steamgriddb::candidates(
+                &state.http,
+                &key,
+                &metadata::text(&args[1]),
+                steam_appid,
+            )
+            .await)
+        }
+        "download_artwork" => {
+            arity(&args, 1, 1)?;
+            let key = storage::artwork_api_key(state.store().await?.data());
+            if key.is_empty() {
+                return Err("SteamGridDB API key is not set".to_owned());
+            }
+            Ok(crate::providers::steamgriddb::download_url(
+                &state.http,
+                &key,
+                &metadata::text(&args[0]),
+            )
+            .await
+            .map(Value::String)
+            .unwrap_or(Value::Null))
+        }
+        "artwork_status" => {
+            arity(&args, 1, 1)?;
+            let ids: Vec<u64> = args[0]
+                .as_array()
+                .map(|values| values.iter().filter_map(Value::as_u64).collect())
+                .unwrap_or_default();
+            Ok(crate::providers::steamgriddb::status(&ids))
         }
         "get_debug_logging" => {
             arity(&args, 0, 0)?;

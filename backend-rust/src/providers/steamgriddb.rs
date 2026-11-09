@@ -230,6 +230,110 @@ fn base64(data: &[u8]) -> String {
     out
 }
 
+/// Every candidate per Steam slot, for the artwork gallery. Only metadata is
+/// returned; images are downloaded one at a time once the user picks one.
+pub async fn candidates(
+    http: &Http,
+    api_key: &str,
+    title: &str,
+    steam_appid: Option<i64>,
+) -> Value {
+    let api_key = api_key.trim();
+    if api_key.is_empty() {
+        return json!({});
+    }
+    let Some(game_id) = resolve_game(http, api_key, title, steam_appid).await else {
+        return json!({});
+    };
+    let grids = assets(http, api_key, &format!("/grids/game/{game_id}?nsfw=false&humor=false&epilepsy=false")).await;
+    let heroes = assets(http, api_key, &format!("/heroes/game/{game_id}?nsfw=false&humor=false&epilepsy=false")).await;
+    let logos = assets(http, api_key, &format!("/logos/game/{game_id}?nsfw=false&humor=false")).await;
+
+    let mut payload = serde_json::Map::new();
+    payload.insert(
+        "portrait".into(),
+        listing(&grids, |width, height| height > width && ratio(width, height, 2.0 / 3.0, 0.08)),
+    );
+    payload.insert(
+        "landscape".into(),
+        listing(&grids, |width, height| width > height && ratio(width, height, 920.0 / 430.0, 0.25)),
+    );
+    payload.insert("hero".into(), listing(&heroes, |_, _| true));
+    payload.insert("logo".into(), listing(&logos, |_, _| true));
+    Value::Object(payload)
+}
+
+fn listing(assets: &[Value], accept: impl Fn(i64, i64) -> bool) -> Value {
+    Value::Array(
+        assets
+            .iter()
+            .filter(|asset| {
+                let width = asset["width"].as_i64().unwrap_or(0);
+                let height = asset["height"].as_i64().unwrap_or(0);
+                accept(width, height)
+            })
+            .take(8)
+            .filter_map(|asset| {
+                let url = py_string(&asset["url"]);
+                if url.is_empty() {
+                    return None;
+                }
+                Some(json!({
+                    "id": asset["id"].clone(),
+                    "url": url,
+                    "thumb": py_string(&asset["thumb"]),
+                    "width": asset["width"].clone(),
+                    "height": asset["height"].clone(),
+                    "style": py_string(&asset["style"]),
+                }))
+            })
+            .collect(),
+    )
+}
+
+/// Download one gallery image; only SteamGridDB hosts are accepted.
+pub async fn download_url(http: &Http, api_key: &str, url: &str) -> Option<String> {
+    let parsed = reqwest::Url::parse(url).ok()?;
+    if parsed.scheme() != "https" {
+        return None;
+    }
+    let host = parsed.host_str()?;
+    if !host.ends_with(".steamgriddb.com") && host != "steamgriddb.com" {
+        return None;
+    }
+    download(http, api_key.trim(), Some(url)).await
+}
+
+/// Which artwork files Steam already stores for each shortcut.
+pub fn status(app_ids: &[u64]) -> Value {
+    let roots = crate::steam_paths::userdata_roots_from_candidates(
+        &crate::steam_paths::discover_steam_roots(),
+    );
+    let grid = roots
+        .iter()
+        .flat_map(|root| std::fs::read_dir(root).ok().into_iter().flatten().flatten())
+        .map(|entry| entry.path().join("config").join("grid"))
+        .find(|path| path.is_dir());
+    let mut payload = serde_json::Map::new();
+    let Some(grid) = grid else {
+        return Value::Object(payload);
+    };
+    for app_id in app_ids {
+        let exists = |names: &[String]| names.iter().any(|name| grid.join(name).is_file());
+        let base = app_id.to_string();
+        payload.insert(
+            base.clone(),
+            json!({
+                "portrait": exists(&[format!("{base}p.png"), format!("{base}p.jpg")]),
+                "landscape": exists(&[format!("{base}.png"), format!("{base}.jpg")]),
+                "hero": exists(&[format!("{base}_hero.png"), format!("{base}_hero.jpg")]),
+                "logo": exists(&[format!("{base}_logo.png"), format!("{base}_logo.jpg")]),
+            }),
+        );
+    }
+    Value::Object(payload)
+}
+
 /// Payload for the frontend, without empty entries.
 pub fn payload(artwork: Artwork) -> Value {
     let mut payload = serde_json::Map::new();
