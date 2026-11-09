@@ -265,7 +265,22 @@ pub async fn candidates(
     let icons = assets(http, api_key, &format!("/icons/game/{game_id}?nsfw=false&humor=false")).await;
     payload.insert("hero".into(), listing(&heroes, |_, _| true));
     payload.insert("logo".into(), listing(&logos, |_, _| true));
-    payload.insert("icon".into(), listing(&icons, |_, _| true));
+    // Shortcut icons are stored as the image Steam will read: keep raster
+    // formats it understands and prefer PNG.
+    let mut icon_listing = listing(&icons, |_, _| true);
+    if let Some(items) = icon_listing.as_array_mut() {
+        items.sort_by_key(|asset| {
+            let url = py_string(&asset["url"]).to_lowercase();
+            (!url.ends_with(".png")) as u8
+        });
+        items.retain(|asset| {
+            let url = py_string(&asset["url"]).to_lowercase();
+            [".png", ".jpg", ".jpeg", ".webp"]
+                .iter()
+                .any(|extension| url.split('?').next().unwrap_or(&url).ends_with(extension))
+        });
+    }
+    payload.insert("icon".into(), icon_listing);
     Value::Object(payload)
 }
 
@@ -335,12 +350,19 @@ pub async fn apply_shortcut_icon(
         .map(|dir| dir.join("config").join("shortcuts.vdf"))
         .find(|path| path.is_file())
         .ok_or_else(|| "shortcuts.vdf not found".to_owned())?;
+    let extension = parsed
+        .path()
+        .rsplit('.')
+        .next()
+        .map(str::to_lowercase)
+        .filter(|extension| ["png", "jpg", "jpeg", "webp"].contains(&extension.as_str()))
+        .ok_or_else(|| "unsupported icon format".to_owned())?;
     let grid = shortcuts
         .parent()
         .ok_or_else(|| "invalid shortcuts path".to_owned())?
         .join("grid");
     std::fs::create_dir_all(&grid).map_err(|error| error.to_string())?;
-    let icon_path = grid.join(format!("{app_id}_icon.png"));
+    let icon_path = grid.join(format!("{app_id}_icon.{extension}"));
     std::fs::write(&icon_path, &bytes).map_err(|error| error.to_string())?;
     let data = std::fs::read(&shortcuts).map_err(|error| error.to_string())?;
     let updated = crate::shortcuts_vdf::set_shortcut_icon(
