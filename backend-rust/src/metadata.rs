@@ -244,10 +244,11 @@ pub fn sanitize(value: &Value, index: &Value) -> Result<Value, String> {
     }
     // Localized description provenance. Kept only with a usable article URL so
     // the attribution cannot outlive the text it belongs to.
-    if text(&value["localized_source"]) == "Wikipedia" {
+    let localized_source = text(&value["localized_source"]);
+    if ["Wikipedia", "GOG", "MyMemory"].contains(&localized_source.as_str()) {
         let url = https_url(&text(&value["localized_url"]));
         if !url.is_empty() {
-            result["localized_source"] = json!("Wikipedia");
+            result["localized_source"] = json!(localized_source);
             result["localized_title"] = json!(text(&value["localized_title"]));
             result["localized_url"] = json!(url);
             result["localized_language"] = json!(text(&value["localized_language"]));
