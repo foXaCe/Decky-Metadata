@@ -613,6 +613,7 @@ pub async fn apply_fetched(
     let Some(fetched) = fetch(state, slug).await? else {
         return Ok(None);
     };
+    let fetched = localize_description(state, fetched, "").await;
     save_fetched(state, app_id, fetched, true).await
 }
 
@@ -627,6 +628,7 @@ pub async fn apply_auto_fetched(
     let Some(fetched) = auto_fetch(state, title).await? else {
         return Ok(None);
     };
+    let fetched = localize_description(state, fetched, title).await;
     save_fetched(state, app_id, fetched, false).await
 }
 
@@ -709,7 +711,50 @@ pub async fn with_steam_news(
         value["steam_news"] = json!(sanitize_news(&value["steam_news"])?);
         value["steam_news_enriched_at"] = number_integer(&value["steam_news_enriched_at"], 0.0)?;
     }
+    let value = localize_description(state, value, &clean_title).await;
     sanitize_for(state, &value).await
+}
+
+/// Fill the description from a source written in the active language when Steam
+/// supplied none.
+///
+/// Only records without provider-native localized text are touched: Steam
+/// records keep their store text and manually edited records keep the user's
+/// words. Wikipedia text is attributed through `localized_url`.
+async fn localize_description(
+    state: &crate::state::AppState,
+    mut value: Value,
+    title: &str,
+) -> Value {
+    use crate::providers::wikipedia;
+    let language = state.http.content_language();
+    if language == "english" || !value.is_object() {
+        return value;
+    }
+    let source = text(&value["source"]).trim().to_lowercase();
+    if source == "steam" || source == "manual" {
+        return value;
+    }
+    let already = text(&value["localized_language"]).eq_ignore_ascii_case(&language)
+        && py_truthy(&value["localized_url"]);
+    if already {
+        return value;
+    }
+    let title = if title.is_empty() {
+        text(&value["title"])
+    } else {
+        title.to_owned()
+    };
+    let Some(intro) = wikipedia::localized_intro(&state.http, &language, &title).await else {
+        return value;
+    };
+    value["description"] = json!(intro.extract);
+    value["short_description"] = json!(intro.extract);
+    value["localized_source"] = json!("Wikipedia");
+    value["localized_title"] = json!(intro.title);
+    value["localized_url"] = json!(intro.url);
+    value["localized_language"] = json!(language);
+    value
 }
 
 pub async fn enrich_steam(
@@ -963,6 +1008,83 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[tokio::test]
+    async fn only_records_without_localized_provider_text_get_a_wikipedia_description() {
+        use crate::http::{Fixture, Http};
+        use crate::state::AppState;
+        use reqwest::Url;
+        use std::sync::Arc;
+
+        let wiki_url = |pairs: &[(&str, &str)]| {
+            let mut url = Url::parse("https://fr.wikipedia.org/w/api.php").unwrap();
+            for (key, value) in pairs {
+                url.query_pairs_mut().append_pair(key, value);
+            }
+            url.to_string()
+        };
+        let search = wiki_url(&[
+            ("action", "query"),
+            ("list", "search"),
+            ("srsearch", "Neutral Racer"),
+            ("srlimit", "5"),
+            ("format", "json"),
+            ("utf8", "1"),
+        ]);
+        let extract = wiki_url(&[
+            ("action", "query"),
+            ("prop", "extracts"),
+            ("exintro", "1"),
+            ("explaintext", "1"),
+            ("redirects", "1"),
+            ("format", "json"),
+            ("utf8", "1"),
+            ("titles", "Neutral Racer"),
+        ]);
+        let http = Http::fixtures(vec![
+            Fixture::json(
+                search,
+                json!({"query":{"search":[{"title":"Neutral Racer"}]}}),
+            ),
+            Fixture::json(
+                extract,
+                json!({"query":{"pages":{"1":{"title":"Neutral Racer",
+                    "extract":"Neutral Racer est un jeu vidéo de course automobile."}}}}),
+            ),
+        ]);
+        let directory = TestDirectory::new();
+        let mut state = AppState::new(directory.env()).unwrap();
+        let inner = Arc::get_mut(&mut state).unwrap();
+        inner.cancel = http.cancel.clone();
+        inner.http = http;
+        state.initialize().await.unwrap();
+        state.http.set_content_language("french");
+
+        let record = json!({"title":"Neutral Racer","source":"IGN","description":"English text"});
+        let localized = localize_description(&state, record, "Neutral Racer").await;
+        assert_eq!(localized["description"], "Neutral Racer est un jeu vidéo de course automobile.");
+        assert_eq!(localized["localized_source"], "Wikipedia");
+        assert_eq!(localized["localized_language"], "french");
+        assert_eq!(localized["localized_url"], "https://fr.wikipedia.org/wiki/Neutral_Racer");
+
+        // A second pass reuses the stamp and keeps the text.
+        let again = localize_description(&state, localized.clone(), "Neutral Racer").await;
+        assert_eq!(again["description"], localized["description"]);
+
+        // Provider-localized and manual text are never replaced.
+        for source in ["Steam", "Manual"] {
+            let kept = localize_description(
+                &state,
+                json!({"title":"Neutral Racer","source":source,"description":"Kept"}),
+                "Neutral Racer",
+            )
+            .await;
+            assert_eq!(kept["description"], "Kept");
+            assert!(kept.get("localized_source").is_none());
+        }
+        state.http.assert_drained();
+        state.shutdown().await.unwrap();
     }
 
     #[tokio::test]
