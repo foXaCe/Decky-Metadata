@@ -790,15 +790,38 @@ pub async fn localize_record(
 /// The record is returned unsaved so the scan commits it with the same guarded
 /// write as every other result. Wikidata must confirm the article is a video
 /// game, so an application or a service is never saved as a game.
-pub async fn create_from_wikipedia(
+pub async fn create_localized_record(
     state: &crate::state::AppState,
     base: &Value,
 ) -> Result<Option<Value>, String> {
     use crate::providers::wikipedia;
     let language = state.http.content_language();
+    // The English fallback already covers an English library.
+    if language == "english" {
+        return Ok(None);
+    }
     let title = text(&base["title"]);
     if title.is_empty() {
         return Ok(None);
+    }
+    if let Some(gog) = crate::providers::gog::localized_description(
+        &state.http,
+        crate::providers::gog::gog_locale(&language),
+        &title,
+    )
+    .await
+    {
+        let mut record = if base.is_object() { base.clone() } else { json!({}) };
+        record["title"] = json!(title);
+        record["description"] = json!(gog.text);
+        record["short_description"] = json!(gog.text);
+        record["source"] = json!("GOG");
+        record["localized_source"] = json!("GOG");
+        record["localized_title"] = json!(gog.title);
+        record["localized_url"] = json!(gog.url);
+        record["localized_language"] = json!(language);
+        record["localized_attempted"] = json!(language);
+        return Ok(Some(record));
     }
     let wikipedia::Lookup::Found(intro) =
         wikipedia::localized_intro(&state.http, &language, &title).await
@@ -856,6 +879,20 @@ async fn localize_description(
     } else {
         title.to_owned()
     };
+    // A store description beats an encyclopedia summary when the game is sold
+    // on a localized storefront.
+    if let Some(gog) =
+        crate::providers::gog::localized_description(&state.http, crate::providers::gog::gog_locale(&language), &title).await
+    {
+        value["localized_attempted"] = json!(language);
+        value["localized_source"] = json!("GOG");
+        value["localized_title"] = json!(gog.title);
+        value["localized_url"] = json!(gog.url);
+        value["localized_language"] = json!(language);
+        value["description"] = json!(gog.text);
+        value["short_description"] = json!(gog.text);
+        return value;
+    }
     let intro = match wikipedia::localized_intro(&state.http, &language, &title).await {
         wikipedia::Lookup::Found(intro) => intro,
         // Remember a completed lookup with no usable article, but never a
@@ -1025,6 +1062,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_gog_store_description_wins_over_wikipedia() {
+        use crate::http::{Fixture, Http};
+        use crate::state::AppState;
+        use reqwest::Url;
+        use std::sync::Arc;
+
+        let mut catalog = Url::parse("https://catalog.gog.com/v1/catalog").unwrap();
+        catalog.query_pairs_mut()
+            .append_pair("query", "like:Neutral Racer")
+            .append_pair("limit", "5")
+            .append_pair("locale", "fr-FR");
+        let mut product = Url::parse("https://api.gog.com/products/77").unwrap();
+        product.query_pairs_mut()
+            .append_pair("locale", "fr-FR")
+            .append_pair("expand", "description");
+        let http = Http::fixtures(vec![
+            Fixture::json(
+                catalog.to_string(),
+                json!({"products": [{"id": "77", "title": "Neutral Racer", "slug": "neutral_racer"}]}),
+            ),
+            Fixture::json(
+                product.to_string(),
+                json!({"title": "Neutral Racer",
+                       "description": {"lead": "<p>Neutral Racer est un jeu de course arcade arcadien.</p>"}}),
+            ),
+        ]);
+        let directory = TestDirectory::new();
+        let mut state = AppState::new(directory.env()).unwrap();
+        let inner = Arc::get_mut(&mut state).unwrap();
+        inner.cancel = http.cancel.clone();
+        inner.http = http;
+        state.initialize().await.unwrap();
+        state.http.set_content_language("french");
+
+        let localized = localize_description(
+            &state,
+            json!({"title":"Neutral Racer","source":"IGN","description":"English text"}),
+            "Neutral Racer",
+        )
+        .await;
+        assert_eq!(localized["localized_source"], "GOG");
+        assert_eq!(localized["localized_url"], "https://www.gog.com/game/neutral_racer");
+        assert!(localized["description"].as_str().unwrap().contains("jeu de course arcade"));
+        state.http.assert_drained();
+        state.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn wikipedia_creates_a_record_only_for_a_confirmed_video_game() {
         use crate::http::{Fixture, Http};
         use crate::state::AppState;
@@ -1054,11 +1139,21 @@ mod tests {
         let extract = || url(&[("action","query"),("prop","extracts"),("exintro","1"),
             ("explaintext","1"),("redirects","1"),("format","json"),("utf8","1"),
             ("titles","Example Quest")]);
+        let gog_url = || {
+            let mut url = Url::parse("https://catalog.gog.com/v1/catalog").unwrap();
+            url.query_pairs_mut()
+                .append_pair("query", "like:Example Quest")
+                .append_pair("limit", "5")
+                .append_pair("locale", "fr-FR");
+            url.to_string()
+        };
         let http = Http::fixtures(vec![
+            Fixture::json(gog_url(), json!({"products": []})),
             Fixture::json(search(), json!({"query":{"search":[{"title":"Example Quest"}]}})),
             Fixture::json(extract(), json!({"query":{"pages":{"1":{"extract":"Example Quest est un jeu vidéo d'aventure."}}}})),
             Fixture::json(wikidata("Example Quest"), json!({"entities":{"Q1":{"claims":{"P31":[
                 {"mainsnak":{"datavalue":{"value":{"id":"Q7889"}}}}]}}}})),
+            Fixture::json(gog_url(), json!({"products": []})),
             Fixture::json(search(), json!({"query":{"search":[{"title":"Example Quest"}]}})),
             Fixture::json(extract(), json!({"query":{"pages":{"1":{"extract":"Example Quest est un jeu vidéo d'aventure."}}}})),
             Fixture::json(wikidata("Example Quest"), json!({"entities":{"Q1":{"claims":{"P31":[
@@ -1072,7 +1167,7 @@ mod tests {
         state.initialize().await.unwrap();
         state.http.set_content_language("french");
 
-        let created = create_from_wikipedia(&state, &json!({"title":"Example Quest"}))
+        let created = create_localized_record(&state, &json!({"title":"Example Quest"}))
             .await
             .unwrap()
             .expect("a confirmed game is saved");
@@ -1082,7 +1177,7 @@ mod tests {
         assert_eq!(created["localized_url"], "https://fr.wikipedia.org/wiki/Example_Quest");
 
         // A software article is rejected even when its intro mentions games.
-        assert!(create_from_wikipedia(&state, &json!({"title":"Example Quest"}))
+        assert!(create_localized_record(&state, &json!({"title":"Example Quest"}))
             .await
             .unwrap()
             .is_none());
@@ -1278,7 +1373,16 @@ mod tests {
             ("utf8", "1"),
             ("titles", "Neutral Racer"),
         ]);
+        let gog_url = || {
+            let mut url = Url::parse("https://catalog.gog.com/v1/catalog").unwrap();
+            url.query_pairs_mut()
+                .append_pair("query", "like:Neutral Racer")
+                .append_pair("limit", "5")
+                .append_pair("locale", "fr-FR");
+            url.to_string()
+        };
         let http = Http::fixtures(vec![
+            Fixture::json(gog_url(), json!({"products": []})),
             Fixture::json(
                 search,
                 json!({"query":{"search":[{"title":"Neutral Racer"}]}}),
