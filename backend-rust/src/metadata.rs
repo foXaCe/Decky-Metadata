@@ -791,11 +791,15 @@ async fn localize_description(
     } else {
         title.to_owned()
     };
-    let Some(intro) = wikipedia::localized_intro(&state.http, &language, &title).await else {
-        // Remember the failed attempt for this language so a scan does not ask
-        // again for a title Wikipedia has no article for.
-        value["localized_attempted"] = json!(language);
-        return value;
+    let intro = match wikipedia::localized_intro(&state.http, &language, &title).await {
+        wikipedia::Lookup::Found(intro) => intro,
+        // Remember a completed lookup with no usable article, but never a
+        // request failure: a later scan may still succeed.
+        wikipedia::Lookup::NotFound => {
+            value["localized_attempted"] = json!(language);
+            return value;
+        }
+        wikipedia::Lookup::Unavailable => return value,
     };
     value["localized_attempted"] = json!(language);
     value["description"] = json!(intro.extract);
