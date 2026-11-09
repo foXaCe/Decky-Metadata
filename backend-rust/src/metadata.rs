@@ -239,7 +239,8 @@ pub fn sanitize(value: &Value, index: &Value) -> Result<Value, String> {
         result["hltb_game_id"] = json!(id);
     }
     let attempted = text(&value["localized_attempted"]);
-    if crate::locale::normalize(&attempted).is_some() {
+    let attempted_language = attempted.split('#').next().unwrap_or("");
+    if crate::locale::normalize(attempted_language).is_some() {
         result["localized_attempted"] = json!(attempted);
     }
     // Localized description provenance. Kept only with a usable article URL so
@@ -1297,6 +1298,12 @@ mod tests {
         // A record that already carries a localized text is never retried.
         let done = json!({"source":"IGN","localized_url":"https://fr.wikipedia.org/wiki/Game"});
         assert!(!needs_localization(&done, "french"));
+        let marked = sanitize(
+            &json!({"title":"T","localized_attempted":"french#2"}),
+            &Value::Null,
+        )
+        .unwrap();
+        assert_eq!(marked["localized_attempted"], "french#2");
     }
 
     #[test]
