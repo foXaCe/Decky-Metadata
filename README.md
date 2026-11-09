@@ -59,9 +59,16 @@ games](docs/help/editing-games.md) for the full steps.
 
 The Quick Access Menu, the editor, the context-menu entries, and the plugin
 toasts follow the Steam interface language. English and French are bundled;
-any other Steam language falls back to English. Text that Steam or a metadata
-provider supplies (descriptions, news, Steam category names, in-game badges)
-keeps the language of its source.
+any other Steam language falls back to English.
+
+Downloaded metadata follows the Steam language too. Store descriptions, genres,
+and partner events are requested in that language, and saved records are marked
+with the language they were fetched in. If you switch Steam's language, the
+Quick Access Menu refreshes the affected records in the background.
+
+Steam Community posts, IGN text, and Steam's news API stay in English: those
+providers have no verified language contract, so their text is used as the
+English fallback rather than presented as a translation.
 
 ## What you can see
 

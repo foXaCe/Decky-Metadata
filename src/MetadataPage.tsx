@@ -56,6 +56,7 @@ import {
   MetadataSearchResult,
   ShortcutNameManagement,
 } from "./types";
+import { syncContentLocale } from "./contentLocale";
 import { toastError, toastSuccess, toastWarn } from "./toast";
 import { SteamMatchPicker } from "./SteamMatchPicker";
 import { t, useLocale } from "./i18n";
@@ -1049,6 +1050,11 @@ export const MetadataPage = () => {
 
   // Appended after the editor's own hooks so component state keeps its order.
   useLocale();
+  // Tell the backend which language metadata should be fetched in; the editor
+  // reads each record fresh, so no cache reload is needed here.
+  useEffect(() => {
+    void syncContentLocale();
+  }, []);
 
   return (
     <ScrollPanel>
