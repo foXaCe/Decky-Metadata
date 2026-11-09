@@ -66,6 +66,12 @@ Steam Community posts, IGN text, and Steam's news API stay in English: those
 providers have no verified language contract, so their text is used as the
 English fallback rather than presented as a translation.
 
+When Steam has no store text in the active language (for example a title that is
+not sold on Steam), the description falls back to the Wikipedia article written
+in that language. Only the article intro is used, and the article URL is kept
+with the saved record so the source stays identifiable. Wikipedia text is
+licensed under CC BY-SA.
+
 ## What you can see
 
 ### Game details and links
