@@ -10,10 +10,11 @@
 //! the record for attribution (Wikipedia text is CC BY-SA).
 
 use crate::{
-    http::Http,
+    http::{Http, Redirects},
     matching::{clean_game_title, py_string},
 };
-use reqwest::Url;
+use reqwest::{Method, Url};
+use serde_json::json;
 use std::time::Duration;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
@@ -36,9 +37,18 @@ const RETRY_DELAY: Duration = Duration::from_millis(1);
 
 static NEXT_REQUEST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
-/// Space requests out and retry once, so a burst of lookups does not turn into
-/// rate-limit errors that leave descriptions in English.
+/// Space requests out, retry one transient failure, and stop asking once
+/// Wikimedia rate-limits this client.
 async fn fetch_json(http: &Http, url: &str) -> Result<serde_json::Value, ()> {
+    if let Some(seconds) = blocked_remaining() {
+        crate::logging::event(
+            "wikipedia",
+            "requests paused after a rate-limit response",
+            json!({"seconds_remaining": seconds}),
+            log::Level::Warn,
+        );
+        return Err(());
+    }
     for attempt in 0..2 {
         if attempt > 0 {
             tokio::time::sleep(RETRY_DELAY).await;
@@ -46,20 +56,95 @@ async fn fetch_json(http: &Http, url: &str) -> Result<serde_json::Value, ()> {
         if let Some(delay) = reserve_request_slot() {
             tokio::time::sleep(delay).await;
         }
-        match http.json(url, REQUEST_TIMEOUT, REQUEST_LIMIT).await {
-            Ok(payload) => return Ok(payload),
+        match http
+            .request(
+                Method::GET,
+                url,
+                &[],
+                None,
+                REQUEST_TIMEOUT,
+                REQUEST_LIMIT,
+                Redirects::Default,
+            )
+            .await
+        {
+            Ok(response) if response.status == 429 => {
+                let seconds = retry_after(&response.headers).unwrap_or(60);
+                block_for(seconds);
+                crate::logging::event(
+                    "wikipedia",
+                    "rate limited",
+                    json!({"retry_after_seconds": seconds}),
+                    log::Level::Warn,
+                );
+                return Err(());
+            }
+            Ok(response) if (200..300).contains(&response.status) => {
+                return response.json().map_err(|error| {
+                    crate::logging::event(
+                        "wikipedia",
+                        "unreadable response",
+                        json!({"error": error}),
+                        log::Level::Warn,
+                    );
+                });
+            }
+            Ok(response) => {
+                crate::logging::event(
+                    "wikipedia",
+                    "unexpected status",
+                    json!({"status": response.status}),
+                    log::Level::Warn,
+                );
+            }
             Err(error) => {
                 crate::logging::event(
                     "wikipedia",
                     "request failed",
-                    serde_json::json!({"url": url.split('?').next().unwrap_or(url), "error": error}),
+                    json!({"host": url.split('?').next().unwrap_or(url), "error": error}),
                     log::Level::Warn,
                 );
-                continue;
             }
         }
     }
     Err(())
+}
+
+fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    headers
+        .get("retry-after")?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()
+        .map(|seconds| seconds.min(900))
+}
+
+#[cfg(not(test))]
+static BLOCKED_UNTIL: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+#[cfg(not(test))]
+fn block_for(seconds: u64) {
+    if let Ok(mut until) = BLOCKED_UNTIL.lock() {
+        *until = Some(std::time::Instant::now() + Duration::from_secs(seconds));
+    }
+}
+
+#[cfg(not(test))]
+fn blocked_remaining() -> Option<u64> {
+    let guard = BLOCKED_UNTIL.lock().ok()?;
+    let until = (*guard)?;
+    let remaining = until.saturating_duration_since(std::time::Instant::now());
+    (!remaining.is_zero()).then(|| remaining.as_secs().max(1))
+}
+
+#[cfg(test)]
+fn block_for(_seconds: u64) {}
+
+#[cfg(test)]
+fn blocked_remaining() -> Option<u64> {
+    None
 }
 
 fn reserve_request_slot() -> Option<Duration> {
@@ -175,7 +260,15 @@ pub async fn localized_intro(http: &Http, language: &str, game_title: &str) -> L
         Err(()) => return Lookup::Unavailable,
     };
     let mut request_failed = false;
-    for candidate in ranked(candidates, &title)
+    let mut ranked_candidates = ranked(candidates, &title);
+    if ranked_candidates.is_empty() && query != title {
+        // Compilations and unusual titles can rank better without the term.
+        match search(http, code, &title).await {
+            Ok(candidates) => ranked_candidates = ranked(candidates, &title),
+            Err(()) => request_failed = true,
+        }
+    }
+    for candidate in ranked_candidates
         .into_iter()
         .take(MAX_EXTRACT_ATTEMPTS)
     {
@@ -305,12 +398,18 @@ fn title_score(candidate: &str, target: &str) -> f64 {
         return 0.0;
     }
     let intersection = left.intersection(&right).count() as f64;
+    // An article titled with a shortened form of the game name ("R-Type III"
+    // for "R-Type III: The Third Lightning") is still the right article.
+    if left.len() >= 2 && left.is_subset(&right) {
+        return 0.9;
+    }
     let union = left.union(&right).count() as f64;
     intersection / union
 }
 
 /// Lowercase, strip accents, drop parenthetical disambiguation and punctuation.
 fn normalize(text: &str) -> String {
+    let text = text.replace('&', " and ");
     let mut normalized = String::with_capacity(text.len());
     let mut depth = 0usize;
     for character in text.chars() {
@@ -364,10 +463,14 @@ fn looks_like_game(intro: &str) -> bool {
     // Foreign titles and parentheticals can push the genre well past the first
     // line, so the game keyword is searched in the whole lead paragraph.
     let head: String = intro.chars().take(600).collect::<String>().to_lowercase();
-    if ["série", "serie", "series", "franchise", "saga"]
+    // "X est une série de jeux vidéo" is a series article; "X est un jeu vidéo
+    // de la série Y" is the game this provider wants.
+    let series = ["est une série", "est la série", "is a series", "is the series",
+                  "es una serie", "ist eine serie", "è una serie", "é uma série",
+                  "franchise"]
         .iter()
-        .any(|hint| opening.contains(hint))
-    {
+        .any(|hint| opening.contains(hint));
+    if series {
         return false;
     }
     ["jeu", "game", "spiel", "juego", "videogioco", "jogo", "gioco", "игр",
@@ -528,10 +631,16 @@ mod tests {
 
     #[tokio::test]
     async fn skips_non_game_candidates() {
-        let http = Http::fixtures(vec![Fixture::json(
-            search_url("fr", "Example Quest jeu vidéo"),
-            search_payload(&["Example Quest (film)"]),
-        )]);
+        let http = Http::fixtures(vec![
+            Fixture::json(
+                search_url("fr", "Example Quest jeu vidéo"),
+                search_payload(&["Example Quest (film)"]),
+            ),
+            Fixture::json(
+                search_url("fr", "Example Quest"),
+                search_payload(&["Example Quest (film)"]),
+            ),
+        ]);
         assert!(matches!(
             localized_intro(&http, "french", "Example Quest").await,
             Lookup::NotFound
@@ -551,10 +660,16 @@ mod tests {
 
     #[tokio::test]
     async fn ignores_unrelated_search_results() {
-        let http = Http::fixtures(vec![Fixture::json(
-            search_url("fr", "Neutral Racer jeu vidéo"),
-            search_payload(&["Unrelated Article", "Another Subject"]),
-        )]);
+        let http = Http::fixtures(vec![
+            Fixture::json(
+                search_url("fr", "Neutral Racer jeu vidéo"),
+                search_payload(&["Unrelated Article", "Another Subject"]),
+            ),
+            Fixture::json(
+                search_url("fr", "Neutral Racer"),
+                search_payload(&["Unrelated Article", "Another Subject"]),
+            ),
+        ]);
         assert!(matches!(
             localized_intro(&http, "french", "Neutral Racer").await,
             Lookup::NotFound
@@ -605,6 +720,43 @@ mod tests {
         ]);
         assert_eq!(is_video_game(&failed, "fr", "Example Quest").await, None);
         failed.assert_drained();
+    }
+
+    #[test]
+    fn accepts_a_game_that_belongs_to_a_series() {
+        assert!(looks_like_game(
+            "Example Quest est un jeu vidéo de la série Example."
+        ));
+        assert!(!looks_like_game(
+            "Example Quest est une série de jeux vidéo."
+        ));
+    }
+
+    #[test]
+    fn treats_and_ampersand_as_the_same_word() {
+        assert_eq!(normalize("Example & Friends"), normalize("Example and Friends"));
+    }
+
+    #[tokio::test]
+    async fn accepts_a_shortened_article_title() {
+        let http = Http::fixtures(vec![
+            Fixture::json(
+                search_url("fr", "Example Racer III: The Final Lap jeu vidéo"),
+                search_payload(&["Example Racer III"]),
+            ),
+            Fixture::json(
+                extract_url("fr", "Example Racer III"),
+                extract_payload(
+                    "Example Racer III",
+                    "Example Racer III est un jeu vidéo de course automobile.",
+                ),
+            ),
+        ]);
+        let Lookup::Found(intro) = localized_intro(&http, "french", "Example Racer III: The Final Lap").await else {
+            panic!("expected the shortened article to match");
+        };
+        assert_eq!(intro.title, "Example Racer III");
+        http.assert_drained();
     }
 
     #[test]
