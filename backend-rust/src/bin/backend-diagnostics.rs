@@ -21,7 +21,7 @@ const MEDIA_TIMEOUT: Duration = Duration::from_secs(12);
 const GH_TIMEOUT: Duration = Duration::from_secs(60);
 const GH_MAX_BYTES: usize = 32 * 1024 * 1024;
 const GH_HEADER_MAX_BYTES: usize = 64 * 1024;
-const GH_REPOSITORY: &str = "beallio/Decky-Metadata";
+const GH_REPOSITORY: &str = "foXaCe/Decky-Metadata";
 const GH_API: &str = "https://api.github.com";
 const STEAM_COMMUNITY_APPID: i64 = 570;
 const STORE_INPUT_MAX_BYTES: usize = 64 * 1024 * 1024;
@@ -1177,7 +1177,7 @@ mod tests {
             "draft": false,
             "prerelease": false,
             "published_at": "2026-01-01T00:00:00Z",
-            "html_url": "https://github.com/beallio/Decky-Metadata/releases/tag/v1.2.3",
+            "html_url": "https://github.com/foXaCe/Decky-Metadata/releases/tag/v1.2.3",
             "assets": [
                 {"id": 1, "size": 200, "name": "Decky-Metadata-v1.2.3.manifest.json", "browser_download_url": "https://github.com/manifest"},
                 {"id": 2, "size": 12, "name": "Decky-Metadata.zip", "browser_download_url": "https://github.com/archive"}

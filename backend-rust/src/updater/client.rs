@@ -6,8 +6,8 @@ use reqwest::Method;
 use serde_json::json;
 use std::{collections::HashMap, time::Duration};
 
-const RELEASES_URL: &str = "https://api.github.com/repos/beallio/Decky-Metadata/releases";
-const RELEASE_TAG_URL: &str = "https://api.github.com/repos/beallio/Decky-Metadata/releases/tags/";
+const RELEASES_URL: &str = "https://api.github.com/repos/foXaCe/Decky-Metadata/releases";
+const RELEASE_TAG_URL: &str = "https://api.github.com/repos/foXaCe/Decky-Metadata/releases/tags/";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Clone)]

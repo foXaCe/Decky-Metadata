@@ -663,7 +663,7 @@ mod tests {
 
     fn empty_release_check() -> Http {
         Http::fixtures(vec![Fixture::json(
-            "https://api.github.com/repos/beallio/Decky-Metadata/releases",
+            "https://api.github.com/repos/foXaCe/Decky-Metadata/releases",
             json!([]),
         )])
     }

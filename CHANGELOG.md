@@ -4,6 +4,16 @@ All notable changes to this project are documented here in Keep a Changelog form
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-09
+
+Updates now come from this fork.
+
+### Changed
+
+- **Update source.** The plugin checks releases from `foXaCe/Decky-Metadata`
+  instead of the upstream repository, so an upstream release can no longer
+  replace this build. The host diagnostics follow the same source.
+
 ## [0.7.0] - 2026-11-09
 
 French interface, localized metadata, and SteamGridDB artwork.

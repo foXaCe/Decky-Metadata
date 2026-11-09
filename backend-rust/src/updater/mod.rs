@@ -653,10 +653,10 @@ mod tests {
     };
     use serde_json::json;
 
-    const RELEASES_URL: &str = "https://api.github.com/repos/beallio/Decky-Metadata/releases";
+    const RELEASES_URL: &str = "https://api.github.com/repos/foXaCe/Decky-Metadata/releases";
     const MANIFEST_URL: &str = "https://example.test/manifest";
     const RELEASE_TAG_URL: &str =
-        "https://api.github.com/repos/beallio/Decky-Metadata/releases/tags/v0.4.0";
+        "https://api.github.com/repos/foXaCe/Decky-Metadata/releases/tags/v0.4.0";
 
     fn now() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 7, 17, 12, 0, 0).unwrap()
