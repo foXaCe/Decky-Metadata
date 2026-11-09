@@ -4,7 +4,7 @@ Decky Metadata runs on a Steam Deck in SteamOS Gaming Mode with Decky Loader ins
 
 ## Install from a stable release
 
-1. Open the [latest Decky Metadata release](https://github.com/beallio/Decky-Metadata/releases/latest) and download `Decky-Metadata.zip`.
+1. Open the [latest Decky Metadata release](https://github.com/foXaCe/Decky-Metadata/releases/latest) and download `Decky-Metadata.zip`.
 2. Leave the ZIP file as it is. **Do not unzip it.**
 3. In Gaming Mode, open the **Quick Access Menu** and select **Decky**.
 4. Open Decky Loader settings and select **Developer**.

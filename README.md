@@ -1,6 +1,6 @@
 # Decky Metadata
 
-[![Latest release](https://img.shields.io/github/v/release/beallio/Decky-Metadata)](https://github.com/beallio/Decky-Metadata/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/foXaCe/Decky-Metadata)](https://github.com/foXaCe/Decky-Metadata/releases/latest)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
 
 Decky Metadata adds Steam game details to non-Steam games in your library. It
@@ -21,7 +21,7 @@ The same ZIP works with standard Decky Loader and the
 [beallio Loader fork](https://github.com/beallio/decky-loader). The plugin includes
 its backend; you do not need to set up Rust or Python.
 
-1. Open the [latest release](https://github.com/beallio/Decky-Metadata/releases/latest).
+1. Open the [latest release](https://github.com/foXaCe/Decky-Metadata/releases/latest).
 2. Download `Decky-Metadata.zip`. Do not unzip it.
 3. Open the Quick Access Menu and select Decky.
 4. Open Decky Loader settings, then select **Developer**.

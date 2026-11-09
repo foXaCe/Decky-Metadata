@@ -4,6 +4,16 @@ All notable changes to this project are documented here in Keep a Changelog form
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-09
+
+Documentation and download links now point at this fork.
+
+### Changed
+
+- **Release links.** The README badge, the installation help, the release-notes
+  help, the plugin screenshot URL, and the release helper scripts now point at
+  `foXaCe/Decky-Metadata`, matching the update source shipped in 0.7.1.
+
 ## [0.7.1] - 2026-11-09
 
 Updates now come from this fork.

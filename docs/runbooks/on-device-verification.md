@@ -513,7 +513,7 @@ release build:
 ```bash
 # 1. Resolve the latest published stable release, then use Decky's installer.
 #    This opens an on-device confirmation prompt; it is not a read-only check.
-stable_tag="$(gh release view --repo beallio/Decky-Metadata --json tagName --jq .tagName)" &&
+stable_tag="$(gh release view --repo foXaCe/Decky-Metadata --json tagName --jq .tagName)" &&
   ./run.sh scripts/deck/install_release.sh "$stable_tag" auto
 
 # 2. In the panel, enable "Receive development releases", then Check now. A newer

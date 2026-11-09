@@ -22,10 +22,10 @@
 #
 # Requires: gh (authed), the CDP tunnel (auto-raised via tunnel.sh), and the
 # plugin already installed on the Deck.
-# Env: DECKY_DECK_HOST (default steamdeck), REPO (default beallio/Decky-Metadata).
+# Env: DECKY_DECK_HOST (default steamdeck), REPO (default foXaCe/Decky-Metadata).
 set -euo pipefail
 
-repo="${REPO:-beallio/Decky-Metadata}"
+repo="${REPO:-foXaCe/Decky-Metadata}"
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 root="$(git -C "$here" rev-parse --show-toplevel)"
 host="${DECKY_DECK_HOST:-steamdeck}"
